@@ -1,6 +1,6 @@
 # Fluvius Energy Integration
 
-This repository packages a Home Assistant custom integration that logs in to Mijn Fluviu and turns the returned consumption/injection history into long-term energy sensors. Use it if you want the Fluvius data that feeds the official portal to appear inside the Home Assistant Energy dashboard.
+This repository packages a Home Assistant custom integration that logs in to Mijn Fluvius and turns the returned consumption/injection history into long-term energy sensors. Use it if you want the Fluvius data that feeds the official portal to appear inside the Home Assistant Energy dashboard.
 
 ## Features
 
