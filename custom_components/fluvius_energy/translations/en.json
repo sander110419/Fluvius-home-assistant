@@ -1,0 +1,60 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to Fluvius",
+        "description": "Enter the credentials that you also use on mijn.fluvius.be and select the meter you want to expose to Home Assistant.",
+        "data": {
+          "email": "Email address",
+          "password": "Password",
+          "ean": "EAN number",
+          "meter_serial": "Meter serial number"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Reconnect to Fluvius",
+        "description": "Your Fluvius credentials stopped working. Provide the updated values below.",
+        "data": {
+          "email": "Email address",
+          "password": "Password",
+          "ean": "EAN number",
+          "meter_serial": "Meter serial number"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Unable to reach the Fluvius API. Please try again later.",
+      "invalid_auth": "Invalid email, password, or meter information.",
+      "unknown": "Unexpected error while setting up the integration."
+    },
+    "abort": {
+      "already_configured": "This Fluvius EAN is already configured.",
+      "reauth_successful": "Credentials updated successfully."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "consumption_total": {
+        "name": "Total consumption"
+      },
+      "consumption_high": {
+        "name": "Consumption (high tariff)"
+      },
+      "consumption_low": {
+        "name": "Consumption (low tariff)"
+      },
+      "injection_total": {
+        "name": "Total injection"
+      },
+      "injection_high": {
+        "name": "Injection (high tariff)"
+      },
+      "injection_low": {
+        "name": "Injection (low tariff)"
+      },
+      "net_consumption_day": {
+        "name": "Net consumption (day)"
+      }
+    }
+  }
+}
