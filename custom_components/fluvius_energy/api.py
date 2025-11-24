@@ -17,6 +17,7 @@ from .const import (
     DEFAULT_METER_TYPE,
     DEFAULT_TIMEZONE,
     GAS_MIN_LOOKBACK_DAYS,
+    GAS_SUPPORTED_GRANULARITY,
     METER_TYPE_GAS,
 )
 from .auth import FluviusAuthError, get_bearer_token_http
@@ -100,9 +101,12 @@ class FluviusApiClient:
             raise FluviusApiError("Authentication response did not include an access token")
 
         history_params = self._build_history_range()
+        granularity = str(self._options.get(CONF_GRANULARITY, DEFAULT_GRANULARITY))
+        if self._meter_type == METER_TYPE_GAS:
+            granularity = GAS_SUPPORTED_GRANULARITY
         params = {
             **history_params,
-            "granularity": str(self._options.get(CONF_GRANULARITY, DEFAULT_GRANULARITY)),
+            "granularity": granularity,
             "asServiceProvider": "false",
             "meterSerialNumber": self._meter_serial,
         }

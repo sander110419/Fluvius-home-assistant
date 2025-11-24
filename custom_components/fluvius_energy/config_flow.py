@@ -38,6 +38,7 @@ from .const import (
     DOMAIN,
     METER_TYPE_ELECTRICITY,
     METER_TYPE_GAS,
+    GAS_SUPPORTED_GRANULARITY,
 )
 
 DATA_SCHEMA = vol.Schema(
@@ -153,9 +154,14 @@ class FluviusOptionsFlowHandler(config_entries.OptionsFlow):
 
     async def async_step_init(self, user_input: Optional[Dict[str, Any]] = None) -> FlowResult:
         current_meter_type = self._entry.data.get(CONF_METER_TYPE, DEFAULT_METER_TYPE)
+        current_granularity = self._entry.options.get(CONF_GRANULARITY, DEFAULT_GRANULARITY)
+        if current_meter_type == METER_TYPE_GAS:
+            current_granularity = GAS_SUPPORTED_GRANULARITY
 
         if user_input is not None:
             new_meter_type = user_input.pop(CONF_METER_TYPE, current_meter_type)
+            if new_meter_type == METER_TYPE_GAS:
+                user_input[CONF_GRANULARITY] = GAS_SUPPORTED_GRANULARITY
             if new_meter_type != current_meter_type:
                 self.hass.config_entries.async_update_entry(
                     self._entry,
@@ -163,6 +169,13 @@ class FluviusOptionsFlowHandler(config_entries.OptionsFlow):
                 )
                 self._entry = self.hass.config_entries.async_get_entry(self._entry.entry_id)
             return self.async_create_entry(data=user_input)
+
+        granularity_options = [
+            SelectOptionDict(value="3", label="Quarter-hour"),
+            SelectOptionDict(value=DEFAULT_GRANULARITY, label="Daily"),
+        ]
+        if current_meter_type == METER_TYPE_GAS:
+            granularity_options = [SelectOptionDict(value=GAS_SUPPORTED_GRANULARITY, label="Daily")]
 
         schema = vol.Schema(
             {
@@ -178,13 +191,10 @@ class FluviusOptionsFlowHandler(config_entries.OptionsFlow):
                 ),
                 vol.Required(
                     CONF_GRANULARITY,
-                    default=self._entry.options.get(CONF_GRANULARITY, DEFAULT_GRANULARITY),
+                    default=current_granularity,
                 ): SelectSelector(
                     SelectSelectorConfig(
-                        options=[
-                            SelectOptionDict(value="3", label="Quarter-hour"),
-                            SelectOptionDict(value="4", label="Daily"),
-                        ],
+                        options=granularity_options,
                         mode="dropdown",
                     )
                 ),

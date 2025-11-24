@@ -8,7 +8,9 @@ import pytest
 from custom_components.fluvius_energy.api import FluviusApiClient
 from custom_components.fluvius_energy.const import (
     CONF_DAYS_BACK,
+    CONF_GRANULARITY,
     GAS_MIN_LOOKBACK_DAYS,
+    GAS_SUPPORTED_GRANULARITY,
     METER_TYPE_GAS,
 )
 
@@ -91,3 +93,42 @@ def test_gas_history_range_enforces_minimum(monkeypatch):
     end = datetime.fromisoformat(history_range["historyUntil"])
 
     assert (end - start) >= timedelta(days=GAS_MIN_LOOKBACK_DAYS)
+
+
+def test_gas_requests_force_daily_granularity(monkeypatch):
+    """Gas meters must always query the API using daily granularity."""
+
+    client = _make_client(meter_type=METER_TYPE_GAS, options={CONF_GRANULARITY: "3"})
+    monkeypatch.setattr(
+        "custom_components.fluvius_energy.api.get_bearer_token_http",
+        lambda *_, **__: ("token", {}),
+    )
+    client._build_history_range = lambda: {"historyFrom": "start", "historyUntil": "end"}  # type: ignore[assignment]
+
+    captured: dict[str, str] = {}
+
+    class DummyResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return [
+                {
+                    "d": "2025-11-17T05:00:00Z",
+                    "de": "2025-11-18T05:00:00Z",
+                    "v": [{"dc": 0, "t": 1, "v": 1, "u": 3}],
+                }
+            ]
+
+    def fake_get(_url, *, params, headers, timeout):  # type: ignore[no-untyped-def]
+        captured["granularity"] = params["granularity"]
+        assert "Authorization" in headers
+        assert timeout == 30
+        return DummyResponse()
+
+    monkeypatch.setattr(client._session, "get", fake_get)
+
+    summaries = client.fetch_daily_summaries()
+
+    assert captured["granularity"] == GAS_SUPPORTED_GRANULARITY
+    assert summaries[0].metrics["consumption_high"] == pytest.approx(1.0)

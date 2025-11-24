@@ -54,7 +54,7 @@ After the entry is created, use the **Options** button in the integration card t
 
 - **Timezone**: IANA timezone used to build history date ranges (defaults to `Europe/Brussels`).
 - **Days back**: How many days of history to grab per refresh (1–31). Gas entries automatically enforce a 7-day minimum so fresh data appears even with Fluvius' 72-hour gas delay.
-- **Granularity**: Fluvius API granularity flag (`3` = quarter-hourly, `4` = daily).
+- **Granularity**: Fluvius API granularity flag (`3` = quarter-hourly, `4` = daily). Gas entries are automatically forced to daily (`4`) because Fluvius does not expose quarter-hour data for gas meters.
 - **Meter type**: Switch between electricity and gas if you replace the hardware later. Changing this updates the config entry and reloads the integration.
 
 Changing any of these values triggers a config-entry reload.
