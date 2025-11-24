@@ -1,6 +1,6 @@
 # Fluvius Energy Home Assistant Integration
 
-The Fluvius Energy custom integration authenticates against the Mijn Fluvius portal using the Azure B2C PKCE flow and exposes long-term electricity consumption and injection sensors that are compatible with the Home Assistant Energy dashboard.
+The Fluvius Energy custom integration authenticates against the Mijn Fluvius portal using the Azure B2C PKCE flow and exposes long-term electricity consumption/injection sensors alongside gas consumption sensors (reported in kWh) that are compatible with the Home Assistant Energy dashboard. When adding the integration you can now choose whether the entry targets an electricity or gas meter so polling cadence and parsing logic line up with Fluvius' delivery schedule.
 
 ## Configuration
 
@@ -12,6 +12,7 @@ The Fluvius Energy custom integration authenticates against the Mijn Fluvius por
    - Password
    - EAN number
    - Meter serial number
+   - Meter type (electricity or gas)
 5. After the first data refresh, open the Energy dashboard configuration and map:
    - `sensor.fluvius_consumption_total` → Grid consumption
    - `sensor.fluvius_injection_total` → Return to grid (production)
@@ -22,8 +23,9 @@ The Fluvius Energy custom integration authenticates against the Mijn Fluvius por
 The integration exposes an options flow so you can fine-tune historic lookback and date handling without re-adding the entry:
 
 - **Timezone** – IANA timezone used when requesting history (`Europe/Brussels` by default)
-- **Days back** – How many days of history to query (1–31)
+- **Days back** – How many days of history to query (1–31). Gas entries automatically enforce a 7-day minimum so freshly released data (which Fluvius provides with a ~72-hour delay) is captured.
 - **Granularity** – Fluvius API granularity code (`3` quarter-hour, `4` daily)
+- **Meter type** – Switch between electricity and gas if you migrate the entry later. This updates the config entry in addition to storing the other options.
 
 ## Diagnostics
 
@@ -51,6 +53,12 @@ All energy sensors report `state_class=total_increasing`, `device_class=energy`,
 - Injection (high tariff)
 - Injection (low tariff)
 - Net consumption for the latest day
+
+### Gas meters
+
+Fluvius returns two readings per gas interval: volume in m³ and energy in kWh. The integration automatically ignores the m³ duplicate and only stores the kWh values so the `sensor.fluvius_consumption_total` entity can be added directly to the Energy dashboard as a gas source. Injection metrics remain zero for gas meters because Fluvius does not expose gas injection.
+
+Gas measurements are released more slowly than electricity (typically 72 hours). To avoid missing late-arriving datapoints the integration always requests at least seven days of history for gas entries regardless of the configured lookback in the options flow.
 
 ## Testing
 

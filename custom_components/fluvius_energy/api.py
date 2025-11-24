@@ -14,7 +14,10 @@ from .const import (
     CONF_TIMEZONE,
     DEFAULT_DAYS_BACK,
     DEFAULT_GRANULARITY,
+    DEFAULT_METER_TYPE,
     DEFAULT_TIMEZONE,
+    GAS_MIN_LOOKBACK_DAYS,
+    METER_TYPE_GAS,
 )
 from .auth import FluviusAuthError, get_bearer_token_http
 
@@ -23,6 +26,9 @@ try:  # Python 3.9+
 except ImportError:  # pragma: no cover - Windows without tzdata
     ZoneInfo = None  # type: ignore
     ZoneInfoNotFoundError = Exception  # type: ignore
+
+
+CUBIC_METER_UNIT_CODE = 5
 
 
 class FluviusApiError(RuntimeError):
@@ -49,6 +55,7 @@ class FluviusApiClient:
         password: str,
         ean: str,
         meter_serial: str,
+        meter_type: str = DEFAULT_METER_TYPE,
         remember_me: bool = False,
         options: Optional[Dict[str, Any]] = None,
     ) -> None:
@@ -56,6 +63,7 @@ class FluviusApiClient:
         self._password = password
         self._ean = ean
         self._meter_serial = meter_serial
+        self._meter_type = meter_type
         self._remember_me = remember_me
         self._session = requests.Session()
         self._options = options or {}
@@ -123,6 +131,8 @@ class FluviusApiClient:
     def _build_history_range(self) -> Dict[str, str]:
         tzinfo = self._resolve_timezone(self._options.get(CONF_TIMEZONE, DEFAULT_TIMEZONE))
         days_back = max(int(self._options.get(CONF_DAYS_BACK, DEFAULT_DAYS_BACK)), 1)
+        if self._meter_type == METER_TYPE_GAS:
+            days_back = max(days_back, GAS_MIN_LOOKBACK_DAYS)
         local_now = datetime.now(tzinfo)
         start_date = (local_now - timedelta(days=days_back)).replace(hour=0, minute=0, second=0, microsecond=0)
         end_date = local_now.replace(hour=23, minute=59, second=59, microsecond=999000)
@@ -165,29 +175,20 @@ class FluviusApiClient:
         metrics: Dict[str, float] = {metric: 0.0 for metric in ALL_METRICS}
 
         for reading in day_data.get("v", []) or []:
-            try:
-                direction = int(reading.get("dc", 0))
-            except (TypeError, ValueError):
-                direction = 0
-            try:
-                tariff = int(reading.get("t", 0))
-            except (TypeError, ValueError):
-                tariff = 0
-            try:
-                value = float(reading.get("v", 0.0) or 0.0)
-            except (TypeError, ValueError):
-                value = 0.0
+            direction = self._safe_int(reading.get("dc"))
+            tariff = self._safe_int(reading.get("t"), default=1)
+            unit = self._safe_int(reading.get("u"))
+            value = self._safe_float(reading.get("v"))
 
-            if direction == 1:  # Consumption from the grid
-                if tariff == 1:
-                    metrics["consumption_high"] += value
-                else:
-                    metrics["consumption_low"] += value
-            elif direction == 2:  # Injection into the grid
-                if tariff == 1:
-                    metrics["injection_high"] += value
-                else:
-                    metrics["injection_low"] += value
+            if unit == CUBIC_METER_UNIT_CODE:
+                # Gas meters return both m³ and kWh. Ignore the volume duplicate so
+                # Home Assistant sensors keep reporting energy in kWh.
+                continue
+
+            metric_key = self._metric_from_reading(direction, tariff)
+            if not metric_key:
+                continue
+            metrics[metric_key] += value
 
         metrics["consumption_total"] = metrics["consumption_high"] + metrics["consumption_low"]
         metrics["injection_total"] = metrics["injection_high"] + metrics["injection_low"]
@@ -208,3 +209,28 @@ class FluviusApiClient:
         if parsed.tzinfo is None:
             return parsed.replace(tzinfo=timezone.utc)
         return parsed
+
+    @staticmethod
+    def _metric_from_reading(direction: int, tariff: int) -> Optional[str]:
+        """Return the metric bucket that should be incremented for a reading."""
+
+        is_high_tariff = tariff == 1
+        if direction in (0, 1):
+            return "consumption_high" if is_high_tariff else "consumption_low"
+        if direction == 2:
+            return "injection_high" if is_high_tariff else "injection_low"
+        return None
+
+    @staticmethod
+    def _safe_int(value: Any, default: int = 0) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _safe_float(value: Any, default: float = 0.0) -> float:
+        try:
+            return float(value or 0.0)
+        except (TypeError, ValueError):
+            return default

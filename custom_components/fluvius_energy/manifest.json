@@ -1,13 +1,13 @@
 {
   "domain": "fluvius_energy",
   "name": "Fluvius Energy",
-  "version": "0.0.1",
-  "documentation": "https://github.com/sander110419/Fluvius-home-assistant/blob/main/README.md",
-  "issue_tracker": "https://github.com/sander110419/Fluvius-home-assistant/issues",
-  "requirements": ["requests>=2.31.0"],
   "codeowners": ["@sander110419"],
   "config_flow": true,
-  "iot_class": "cloud_polling",
+  "documentation": "https://github.com/sander110419/Fluvius-home-assistant/blob/main/README.md",
   "integration_type": "hub",
-  "quality_scale": "bronze"
+  "issue_tracker": "https://github.com/sander110419/Fluvius-home-assistant/issues",
+  "iot_class": "cloud_polling",
+  "quality_scale": "bronze",
+  "requirements": ["requests>=2.31.0"],
+  "version": "0.0.1"
 }

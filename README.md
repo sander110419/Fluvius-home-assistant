@@ -1,10 +1,12 @@
 # Fluvius Energy Integration
 
-This repository packages a Home Assistant custom integration that logs in to Mijn Fluvius and turns the returned consumption/injection history into long-term energy sensors. Use it if you want the Fluvius data that feeds the official portal to appear inside the Home Assistant Energy dashboard.
+This repository packages a Home Assistant custom integration that logs in to Mijn Fluvius and turns the returned consumption/injection history into long-term energy sensors. Both electricity (consumption/injection) and gas (consumption in kWh) meters are supported so the Fluvius data that feeds the official portal can appear inside the Home Assistant Energy dashboard.
 
 ## Features
 
 - Automatic refresh of Fluvius consumption and injection totals (tariff-specific or overall)
+- Explicit meter-type selection (electricity or gas) so polling and parsing can match Fluvius' delivery cadence
+- Works with electricity and gas meters; gas payloads use the kWh values exposed by Fluvius and ignore duplicate m³ readings
 - Sensors declared with `state_class=total_increasing`, so they qualify for the Energy dashboard
 - Options flow to tweak timezone, lookback window, and Fluvius granularity without re-adding the entry
 - Diagnostics endpoint for privacy-safe troubleshooting
@@ -43,6 +45,7 @@ When a new version is released, replace the folder with the updated copy and res
    - Password
    - EAN (the 18-digit meter identifier)
    - Meter serial number
+   - Meter type (electricity or gas)
 4. Submit the form. The integration validates the credentials by fetching a small history sample before creating the entry.
 
 ### Options Flow
@@ -50,8 +53,9 @@ When a new version is released, replace the folder with the updated copy and res
 After the entry is created, use the **Options** button in the integration card to configure:
 
 - **Timezone**: IANA timezone used to build history date ranges (defaults to `Europe/Brussels`).
-- **Days back**: How many days of history to grab per refresh (1–31).
+- **Days back**: How many days of history to grab per refresh (1–31). Gas entries automatically enforce a 7-day minimum so fresh data appears even with Fluvius' 72-hour gas delay.
 - **Granularity**: Fluvius API granularity flag (`3` = quarter-hourly, `4` = daily).
+- **Meter type**: Switch between electricity and gas if you replace the hardware later. Changing this updates the config entry and reloads the integration.
 
 Changing any of these values triggers a config-entry reload.
 
@@ -59,12 +63,13 @@ Changing any of these values triggers a config-entry reload.
 
 1. Go to **Settings → Dashboards → Energy → Configure**.
 2. Assign sensors:
-   - `sensor.fluvius_consumption_total` → Grid consumption
+   - `sensor.fluvius_consumption_total` → Grid consumption (use this sensor for both electricity and gas sources)
    - `sensor.fluvius_injection_total` → Return to grid / production
 3. Optional sensors for tariff-specific reporting: `consumption_high`, `consumption_low`, `injection_high`, `injection_low`.
 4. A non-cumulative `sensor.fluvius_net_consumption_day` is available for daily comparisons but is not used directly in the Energy dashboard.
 
 ### Diagnostics and Reauthentication
+- Gas data is only published by Fluvius after ~72 hours. The integration automatically fetches at least the past 7 days for gas meters so newly released measurements are not missed.
 
 - Download diagnostics via **Settings → Devices & Services → Fluvius Energy → ... → Download diagnostics**. The payload includes the configured EAN, meter serial, and sanitized lifetime totals.
 - If Fluvius rejects your credentials later, Home Assistant automatically triggers the reauthentication flow. Supply the new email/password and the integration reloads itself.

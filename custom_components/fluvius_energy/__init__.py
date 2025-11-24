@@ -12,6 +12,7 @@ from .const import (
     CONF_EAN,
     CONF_GRANULARITY,
     CONF_METER_SERIAL,
+    CONF_METER_TYPE,
     CONF_PASSWORD,
     CONF_TIMEZONE,
     DATA_CLIENT,
@@ -19,6 +20,7 @@ from .const import (
     DATA_STORE,
     DEFAULT_DAYS_BACK,
     DEFAULT_GRANULARITY,
+    DEFAULT_METER_TYPE,
     DEFAULT_REMEMBER_ME,
     DEFAULT_TIMEZONE,
     DOMAIN,
@@ -49,12 +51,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     hass.data.setdefault(DOMAIN, {})
     options = _build_options(entry)
+    meter_type = entry.data.get(CONF_METER_TYPE, DEFAULT_METER_TYPE)
+    if CONF_METER_TYPE not in entry.data:
+        hass.config_entries.async_update_entry(
+            entry,
+            data={**entry.data, CONF_METER_TYPE: meter_type},
+        )
 
     client = FluviusApiClient(
         email=entry.data[CONF_EMAIL],
         password=entry.data[CONF_PASSWORD],
         ean=entry.data[CONF_EAN],
         meter_serial=entry.data[CONF_METER_SERIAL],
+        meter_type=meter_type,
         remember_me=DEFAULT_REMEMBER_ME,
         options=options,
     )

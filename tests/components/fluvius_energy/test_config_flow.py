@@ -7,15 +7,23 @@ import pytest
 
 from homeassistant import data_entry_flow
 from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
-from tests.common import MockConfigEntry
+tests_common = pytest.importorskip("tests.common")
+MockConfigEntry = tests_common.MockConfigEntry
 
-from custom_components.fluvius_energy.const import CONF_EAN, CONF_METER_SERIAL, DOMAIN
+from custom_components.fluvius_energy.const import (
+    CONF_EAN,
+    CONF_METER_SERIAL,
+    CONF_METER_TYPE,
+    DOMAIN,
+    METER_TYPE_ELECTRICITY,
+)
 
 USER_INPUT = {
     CONF_EMAIL: "test@example.com",
     CONF_PASSWORD: "hunter2",
     CONF_EAN: "541448800000000000",
     CONF_METER_SERIAL: "1SAGTEST",
+    CONF_METER_TYPE: METER_TYPE_ELECTRICITY,
 }
 
 

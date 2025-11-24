@@ -9,8 +9,10 @@ from homeassistant.core import HomeAssistant
 from .const import (
     CONF_EAN,
     CONF_METER_SERIAL,
+    CONF_METER_TYPE,
     DATA_COORDINATOR,
     DATA_STORE,
+    DEFAULT_METER_TYPE,
     DOMAIN,
 )
 from .coordinator import FluviusEnergyDataUpdateCoordinator
@@ -32,6 +34,7 @@ async def async_get_config_entry_diagnostics(
         "config": {
             "ean": entry.data[CONF_EAN],
             "meter_serial": entry.data[CONF_METER_SERIAL],
+            "meter_type": entry.data.get(CONF_METER_TYPE, DEFAULT_METER_TYPE),
         },
         "lifetime_totals": coordinator.data.lifetime_totals if coordinator.data else {},
         "latest_day": {

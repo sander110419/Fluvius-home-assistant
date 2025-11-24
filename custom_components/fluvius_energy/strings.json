@@ -8,7 +8,8 @@
           "email": "Email address",
           "password": "Password",
           "ean": "EAN number",
-          "meter_serial": "Meter serial number"
+          "meter_serial": "Meter serial number",
+          "meter_type": "Meter type"
         }
       },
       "reauth_confirm": {
@@ -18,7 +19,8 @@
           "email": "Email address",
           "password": "Password",
           "ean": "EAN number",
-          "meter_serial": "Meter serial number"
+          "meter_serial": "Meter serial number",
+          "meter_type": "Meter type"
         }
       }
     },

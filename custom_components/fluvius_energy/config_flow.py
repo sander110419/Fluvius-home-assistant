@@ -28,12 +28,16 @@ from .const import (
     CONF_EAN,
     CONF_GRANULARITY,
     CONF_METER_SERIAL,
+    CONF_METER_TYPE,
     CONF_PASSWORD,
     CONF_TIMEZONE,
     DEFAULT_DAYS_BACK,
     DEFAULT_GRANULARITY,
+    DEFAULT_METER_TYPE,
     DEFAULT_TIMEZONE,
     DOMAIN,
+    METER_TYPE_ELECTRICITY,
+    METER_TYPE_GAS,
 )
 
 DATA_SCHEMA = vol.Schema(
@@ -42,6 +46,18 @@ DATA_SCHEMA = vol.Schema(
         vol.Required(CONF_PASSWORD): TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD)),
         vol.Required(CONF_EAN): TextSelector(TextSelectorConfig(type=TextSelectorType.TEXT)),
         vol.Required(CONF_METER_SERIAL): TextSelector(TextSelectorConfig(type=TextSelectorType.TEXT)),
+        vol.Required(
+            CONF_METER_TYPE,
+            default=DEFAULT_METER_TYPE,
+        ): SelectSelector(
+            SelectSelectorConfig(
+                options=[
+                    SelectOptionDict(value=METER_TYPE_ELECTRICITY, label="Electricity meter"),
+                    SelectOptionDict(value=METER_TYPE_GAS, label="Gas meter"),
+                ],
+                mode="dropdown",
+            )
+        ),
     }
 )
 
@@ -81,6 +97,7 @@ class FluviusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_PASSWORD: reauth_entry.data[CONF_PASSWORD],
                 CONF_EAN: reauth_entry.data[CONF_EAN],
                 CONF_METER_SERIAL: reauth_entry.data[CONF_METER_SERIAL],
+                CONF_METER_TYPE: reauth_entry.data.get(CONF_METER_TYPE, DEFAULT_METER_TYPE),
             }
 
         if user_input is not None:
@@ -117,6 +134,7 @@ class FluviusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             password=data[CONF_PASSWORD],
             ean=data[CONF_EAN],
             meter_serial=data[CONF_METER_SERIAL],
+            meter_type=data.get(CONF_METER_TYPE, DEFAULT_METER_TYPE),
         )
         try:
             await hass.async_add_executor_job(client.fetch_daily_summaries)
@@ -134,7 +152,16 @@ class FluviusOptionsFlowHandler(config_entries.OptionsFlow):
         self._entry = entry
 
     async def async_step_init(self, user_input: Optional[Dict[str, Any]] = None) -> FlowResult:
+        current_meter_type = self._entry.data.get(CONF_METER_TYPE, DEFAULT_METER_TYPE)
+
         if user_input is not None:
+            new_meter_type = user_input.pop(CONF_METER_TYPE, current_meter_type)
+            if new_meter_type != current_meter_type:
+                self.hass.config_entries.async_update_entry(
+                    self._entry,
+                    data={**self._entry.data, CONF_METER_TYPE: new_meter_type},
+                )
+                self._entry = self.hass.config_entries.async_get_entry(self._entry.entry_id)
             return self.async_create_entry(data=user_input)
 
         schema = vol.Schema(
@@ -157,6 +184,18 @@ class FluviusOptionsFlowHandler(config_entries.OptionsFlow):
                         options=[
                             SelectOptionDict(value="3", label="Quarter-hour"),
                             SelectOptionDict(value="4", label="Daily"),
+                        ],
+                        mode="dropdown",
+                    )
+                ),
+                vol.Required(
+                    CONF_METER_TYPE,
+                    default=current_meter_type,
+                ): SelectSelector(
+                    SelectSelectorConfig(
+                        options=[
+                            SelectOptionDict(value=METER_TYPE_ELECTRICITY, label="Electricity meter"),
+                            SelectOptionDict(value=METER_TYPE_GAS, label="Gas meter"),
                         ],
                         mode="dropdown",
                     )
