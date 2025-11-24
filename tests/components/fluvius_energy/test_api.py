@@ -10,8 +10,8 @@ from unittest.mock import MagicMock
 
 import aiohttp
 
-from custom_components.fluvius_energy.api import FluviusApiClient
-from custom_components.fluvius_energy.const import (
+from custom_components.fluvius.api import FluviusApiClient
+from custom_components.fluvius.const import (
     CONF_DAYS_BACK,
     CONF_GRANULARITY,
     GAS_MIN_LOOKBACK_DAYS,
@@ -93,7 +93,7 @@ def test_gas_history_range_enforces_minimum(monkeypatch):
                 return fixed_now.astimezone(tz)
             return fixed_now
 
-    monkeypatch.setattr("custom_components.fluvius_energy.api.datetime", FixedDateTime)
+    monkeypatch.setattr("custom_components.fluvius.api.datetime", FixedDateTime)
 
     history_range = client._build_history_range()  # pylint: disable=protected-access
     start = datetime.fromisoformat(history_range["historyFrom"])
@@ -110,7 +110,7 @@ def test_gas_requests_force_daily_granularity(monkeypatch):
     async def fake_token(*_args, **_kwargs):  # type: ignore[no-untyped-def]
         return "token", {}
 
-    monkeypatch.setattr("custom_components.fluvius_energy.api.async_get_bearer_token", fake_token)
+    monkeypatch.setattr("custom_components.fluvius.api.async_get_bearer_token", fake_token)
     client._build_history_range = lambda: {"historyFrom": "start", "historyUntil": "end"}  # type: ignore[assignment]
 
     captured: dict[str, str] = {}

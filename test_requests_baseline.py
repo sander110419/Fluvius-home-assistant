@@ -3,8 +3,8 @@ import logging
 
 import aiohttp
 
-from custom_components.fluvius_energy.api import FluviusApiClient, FluviusApiError
-from custom_components.fluvius_energy.auth import USER_AGENT
+from custom_components.fluvius.api import FluviusApiClient, FluviusApiError
+from custom_components.fluvius.auth import USER_AGENT
 
 logging.basicConfig(level=logging.INFO)
 

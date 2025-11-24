@@ -15,12 +15,12 @@ This repository packages a Home Assistant custom integration that logs in to Mij
 ## Repository Layout
 
 ```
-custom_components/fluvius_energy/   # Integration code (manifest, config flow, sensors, diagnostics)
-docs/integration/fluvius_energy.md  # Extended documentation for end users
-tests/components/fluvius_energy/    # Pytest-based config-flow coverage
+custom_components/fluvius/   # Integration code (manifest, config flow, sensors, diagnostics)
+docs/integration/fluvius.md  # Extended documentation for end users
+tests/components/fluvius/    # Pytest-based config-flow coverage
 ```
 
-Scripts used for the early CLI-based approach are intentionally left out; the integration is self-contained under `custom_components/fluvius_energy`.
+Scripts used for the early CLI-based approach are intentionally left out; the integration is self-contained under `custom_components/fluvius`.
 
 ## Requirements
 
@@ -30,7 +30,7 @@ Scripts used for the early CLI-based approach are intentionally left out; the in
 ## Installation
 
 1. Download or clone this repository.
-2. Copy the entire `custom_components/fluvius_energy` folder to your Home Assistant configuration directory under `custom_components/` (create it if it does not exist).
+2. Copy the entire `custom_components/fluvius` folder to your Home Assistant configuration directory under `custom_components/` (create it if it does not exist).
 3. Restart Home Assistant so it discovers the new integration.
 
 When a new version is released, replace the folder with the updated copy and restart Home Assistant again.
@@ -80,22 +80,22 @@ If you want to remove the Fluvius Energy integration:
 1. Open **Settings → Devices & Services**.
 2. Locate the Fluvius Energy card that corresponds to the meter you want to remove.
 3. Click **Delete** and confirm. Home Assistant will unload the platforms and drop the stored credentials and statistics cache for that entry.
-4. Optional: delete the `custom_components/fluvius_energy` folder from your Home Assistant configuration directory if you no longer plan to use the integration at all.
+4. Optional: delete the `custom_components/fluvius` folder from your Home Assistant configuration directory if you no longer plan to use the integration at all.
 
 ## Testing
 
 Install the Home Assistant dev environment and run:
 
 ```
-pytest tests/components/fluvius_energy/test_config_flow.py
+pytest tests/components/fluvius/test_config_flow.py
 ```
 
 The suite validates the user setup path, invalid credential handling, and the reauthentication workflow. Add additional tests as you extend the integration (coordinator, sensors, diagnostics, etc.).
 
 ## Troubleshooting
 
-- **Config flow cannot be loaded**: Ensure you copied the entire `custom_components/fluvius_energy` directory and restarted Home Assistant. The integration relies on the new selector helpers available in HA 2024.10+.
+- **Config flow cannot be loaded**: Ensure you copied the entire `custom_components/fluvius` directory and restarted Home Assistant. The integration relies on the new selector helpers available in HA 2024.10+.
 - **Setup fails with HTTP errors**: Double-check your Fluvius credentials, EAN, and meter serial. You can also run Home Assistant in debug mode and inspect the logs for `FluviusEnergy` entries.
 - **Energy dashboard shows no data**: Verify that the sensors report values in Developer Tools → States and that you selected the correct entities under Energy configuration. Remember that Home Assistant may take up to an hour to incorporate new statistics.
 
-For deeper details (including API call structure and CSV export examples) see `docs/integration/fluvius_energy.md`.
+For deeper details (including API call structure and CSV export examples) see `docs/integration/fluvius.md`.

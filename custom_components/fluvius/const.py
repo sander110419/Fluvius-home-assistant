@@ -31,7 +31,7 @@ GAS_SUPPORTED_GRANULARITY = "4"
 PLATFORMS: list[Platform] = [Platform.SENSOR]
 
 STORAGE_VERSION = 1
-STORAGE_KEY_TEMPLATE = "fluvius_energy_{entry_id}"
+STORAGE_KEY_TEMPLATE = "fluvius_{entry_id}"
 
 LIFETIME_METRICS = (
     "consumption_high",

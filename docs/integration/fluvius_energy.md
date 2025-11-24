@@ -4,7 +4,7 @@ The Fluvius Energy custom integration authenticates against the Mijn Fluvius por
 
 ## Configuration
 
-1. Copy `custom_components/fluvius_energy` into your Home Assistant `config/custom_components` directory.
+1. Copy `custom_components/fluvius` into your Home Assistant `config/custom_components` directory.
 2. Restart Home Assistant to load the new integration.
 3. Navigate to **Settings → Devices & Services → Add Integration** and search for **Fluvius Energy**.
 4. Provide the same credentials you use on mijn.fluvius.be:
@@ -66,11 +66,11 @@ When you no longer need a Fluvius entry or want to uninstall the integration ent
 
 1. Go to **Settings → Devices & Services** in Home Assistant.
 2. Select the Fluvius Energy config entry you want to remove and choose **Delete**. This unloads the platforms and deletes cached credentials/statistics for that entry.
-3. If you want to fully remove the custom component, delete `custom_components/fluvius_energy` from your Home Assistant configuration directory and restart Home Assistant.
+3. If you want to fully remove the custom component, delete `custom_components/fluvius` from your Home Assistant configuration directory and restart Home Assistant.
 
 ## Testing
 
-Basic config-flow tests live under `tests/components/fluvius_energy/` and exercise:
+Basic config-flow tests live under `tests/components/fluvius/` and exercise:
 
 - Successful user setup
 - Invalid credential handling

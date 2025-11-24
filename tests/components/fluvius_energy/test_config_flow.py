@@ -10,7 +10,7 @@ from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
 tests_common = pytest.importorskip("tests.common")
 MockConfigEntry = tests_common.MockConfigEntry
 
-from custom_components.fluvius_energy.const import (
+from custom_components.fluvius.const import (
     CONF_EAN,
     CONF_METER_SERIAL,
     CONF_METER_TYPE,
@@ -31,10 +31,10 @@ async def test_user_flow_success(hass):
     """Test the happy path of the config flow."""
 
     with patch(
-        "custom_components.fluvius_energy.config_flow.async_create_fluvius_session",
+        "custom_components.fluvius.config_flow.async_create_fluvius_session",
         return_value=MagicMock(),
     ), patch(
-        "custom_components.fluvius_energy.config_flow.FluviusApiClient",
+        "custom_components.fluvius.config_flow.FluviusApiClient",
         autospec=True,
     ) as mock_client:
         instance = mock_client.return_value
@@ -55,10 +55,10 @@ async def test_user_flow_invalid_auth(hass):
     """Ensure invalid credentials bubble up as form errors."""
 
     with patch(
-        "custom_components.fluvius_energy.config_flow.async_create_fluvius_session",
+        "custom_components.fluvius.config_flow.async_create_fluvius_session",
         return_value=MagicMock(),
     ), patch(
-        "custom_components.fluvius_energy.config_flow.FluviusApiClient",
+        "custom_components.fluvius.config_flow.FluviusApiClient",
         autospec=True,
     ) as mock_client:
         instance = mock_client.return_value
@@ -81,10 +81,10 @@ async def test_reauth_updates_entry(hass):
     entry.add_to_hass(hass)
 
     with patch(
-        "custom_components.fluvius_energy.config_flow.async_create_fluvius_session",
+        "custom_components.fluvius.config_flow.async_create_fluvius_session",
         return_value=MagicMock(),
     ), patch(
-        "custom_components.fluvius_energy.config_flow.FluviusApiClient",
+        "custom_components.fluvius.config_flow.FluviusApiClient",
         autospec=True,
     ) as mock_client:
         instance = mock_client.return_value
