@@ -26,6 +26,7 @@ from .const import (
 )
 from .coordinator import FluviusEnergyDataUpdateCoordinator
 from .config_flow import FluviusOptionsFlowHandler
+from .http import async_create_fluvius_session
 from .models import FluviusRuntimeData
 from .store import FluviusEnergyStore
 
@@ -59,7 +60,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             data={**entry.data, CONF_METER_TYPE: meter_type},
         )
 
+    session = async_create_fluvius_session(hass)
+
     client = FluviusApiClient(
+        session=session,
         email=entry.data[CONF_EMAIL],
         password=entry.data[CONF_PASSWORD],
         ean=entry.data[CONF_EAN],

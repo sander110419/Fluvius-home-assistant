@@ -1,7 +1,7 @@
 """Tests for the Fluvius Energy config flow."""
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -27,24 +27,18 @@ USER_INPUT = {
 }
 
 
-@pytest.fixture(autouse=True)
-def mock_executor(hass):
-    async def _async_add_executor_job(func, *args, **kwargs):
-        return func(*args, **kwargs)
-
-    hass.async_add_executor_job = _async_add_executor_job
-    return hass
-
-
 async def test_user_flow_success(hass):
     """Test the happy path of the config flow."""
 
     with patch(
+        "custom_components.fluvius_energy.config_flow.async_create_fluvius_session",
+        return_value=MagicMock(),
+    ), patch(
         "custom_components.fluvius_energy.config_flow.FluviusApiClient",
         autospec=True,
     ) as mock_client:
         instance = mock_client.return_value
-        instance.fetch_daily_summaries = MagicMock(return_value=[])
+        instance.fetch_daily_summaries = AsyncMock(return_value=[])
 
         result = await hass.config_entries.flow.async_init(
             DOMAIN,
@@ -61,11 +55,14 @@ async def test_user_flow_invalid_auth(hass):
     """Ensure invalid credentials bubble up as form errors."""
 
     with patch(
+        "custom_components.fluvius_energy.config_flow.async_create_fluvius_session",
+        return_value=MagicMock(),
+    ), patch(
         "custom_components.fluvius_energy.config_flow.FluviusApiClient",
         autospec=True,
     ) as mock_client:
         instance = mock_client.return_value
-        instance.fetch_daily_summaries.side_effect = Exception("auth failure")
+        instance.fetch_daily_summaries = AsyncMock(side_effect=Exception("auth failure"))
 
         result = await hass.config_entries.flow.async_init(
             DOMAIN,
@@ -84,11 +81,14 @@ async def test_reauth_updates_entry(hass):
     entry.add_to_hass(hass)
 
     with patch(
+        "custom_components.fluvius_energy.config_flow.async_create_fluvius_session",
+        return_value=MagicMock(),
+    ), patch(
         "custom_components.fluvius_energy.config_flow.FluviusApiClient",
         autospec=True,
     ) as mock_client:
         instance = mock_client.return_value
-        instance.fetch_daily_summaries = MagicMock(return_value=[])
+        instance.fetch_daily_summaries = AsyncMock(return_value=[])
 
         result = await hass.config_entries.flow.async_init(
             DOMAIN,

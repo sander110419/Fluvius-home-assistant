@@ -5,6 +5,11 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+import asyncio
+from unittest.mock import MagicMock
+
+import aiohttp
+
 from custom_components.fluvius_energy.api import FluviusApiClient
 from custom_components.fluvius_energy.const import (
     CONF_DAYS_BACK,
@@ -19,7 +24,9 @@ def _make_client(*, meter_type: str | None = None, options: dict | None = None) 
     kwargs = {}
     if meter_type is not None:
         kwargs["meter_type"] = meter_type
+    session = MagicMock(spec=aiohttp.ClientSession)
     return FluviusApiClient(
+        session=session,
         email="user@example.com",
         password="secret",
         ean="541448800000000000",
@@ -99,19 +106,28 @@ def test_gas_requests_force_daily_granularity(monkeypatch):
     """Gas meters must always query the API using daily granularity."""
 
     client = _make_client(meter_type=METER_TYPE_GAS, options={CONF_GRANULARITY: "3"})
-    monkeypatch.setattr(
-        "custom_components.fluvius_energy.api.get_bearer_token_http",
-        lambda *_, **__: ("token", {}),
-    )
+
+    async def fake_token(*_args, **_kwargs):  # type: ignore[no-untyped-def]
+        return "token", {}
+
+    monkeypatch.setattr("custom_components.fluvius_energy.api.async_get_bearer_token", fake_token)
     client._build_history_range = lambda: {"historyFrom": "start", "historyUntil": "end"}  # type: ignore[assignment]
 
     captured: dict[str, str] = {}
 
     class DummyResponse:
+        status = 200
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, _exc_type, _exc, _tb):
+            return False
+
         def raise_for_status(self):
             return None
 
-        def json(self):
+        async def json(self):
             return [
                 {
                     "d": "2025-11-17T05:00:00Z",
@@ -128,7 +144,7 @@ def test_gas_requests_force_daily_granularity(monkeypatch):
 
     monkeypatch.setattr(client._session, "get", fake_get)
 
-    summaries = client.fetch_daily_summaries()
+    summaries = asyncio.run(client.fetch_daily_summaries())
 
     assert captured["granularity"] == GAS_SUPPORTED_GRANULARITY
     assert summaries[0].metrics["consumption_high"] == pytest.approx(1.0)

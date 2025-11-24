@@ -26,7 +26,6 @@ Scripts used for the early CLI-based approach are intentionally left out; the in
 
 - Home Assistant 2024.10 or newer (tested on 2025.10 dev builds)
 - A Fluvius account with access to the meter you plan to expose
-- Python package `requests` (already declared in `manifest.json`, Home Assistant installs it automatically)
 
 ## Installation
 

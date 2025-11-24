@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
-import requests
+import aiohttp
 
 from .const import (
     ALL_METRICS,
@@ -20,7 +20,7 @@ from .const import (
     GAS_SUPPORTED_GRANULARITY,
     METER_TYPE_GAS,
 )
-from .auth import FluviusAuthError, get_bearer_token_http
+from .auth import FluviusAuthError, async_get_bearer_token
 
 try:  # Python 3.9+
     from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -52,6 +52,7 @@ class FluviusApiClient:
     def __init__(
         self,
         *,
+        session: aiohttp.ClientSession,
         email: str,
         password: str,
         ean: str,
@@ -60,22 +61,22 @@ class FluviusApiClient:
         remember_me: bool = False,
         options: Optional[Dict[str, Any]] = None,
     ) -> None:
+        self._session = session
         self._email = email
         self._password = password
         self._ean = ean
         self._meter_serial = meter_serial
         self._meter_type = meter_type
         self._remember_me = remember_me
-        self._session = requests.Session()
         self._options = options or {}
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
-    def fetch_daily_summaries(self) -> List[FluviusDailySummary]:
+    async def fetch_daily_summaries(self) -> List[FluviusDailySummary]:
         """Retrieve the most recent consumption data and return parsed summaries."""
 
-        payload = self._fetch_raw_consumption()
+        payload = await self._fetch_raw_consumption()
         summaries = self._summaries_from_payload(payload)
         if not summaries:
             raise FluviusApiError("No consumption rows returned by the Fluvius API")
@@ -84,9 +85,10 @@ class FluviusApiClient:
     # ------------------------------------------------------------------
     # HTTP helpers
     # ------------------------------------------------------------------
-    def _fetch_raw_consumption(self) -> List[Dict[str, Any]]:
+    async def _fetch_raw_consumption(self) -> List[Dict[str, Any]]:
         try:
-            access_token, _ = get_bearer_token_http(
+            access_token, _ = await async_get_bearer_token(
+                self._session,
                 self._email,
                 self._password,
                 remember_me=self._remember_me,
@@ -94,7 +96,7 @@ class FluviusApiClient:
             )
         except FluviusAuthError as err:
             raise FluviusApiError(f"Authentication failed: {err}") from err
-        except requests.RequestException as err:
+        except aiohttp.ClientError as err:
             raise FluviusApiError(f"Network error while authenticating: {err}") from err
 
         if not access_token:
@@ -118,13 +120,11 @@ class FluviusApiClient:
         url = f"https://mijn.fluvius.be/verbruik/api/meter-measurement-history/{self._ean}"
 
         try:
-            response = self._session.get(url, params=params, headers=headers, timeout=30)
-            response.raise_for_status()
-        except requests.RequestException as err:
+            async with self._session.get(url, params=params, headers=headers, timeout=30) as response:
+                response.raise_for_status()
+                data: Any = await response.json()
+        except aiohttp.ClientError as err:
             raise FluviusApiError(f"Consumption API call failed: {err}") from err
-
-        try:
-            data: Any = response.json()
         except ValueError as err:  # pragma: no cover - defensive
             raise FluviusApiError(f"Failed to decode Fluvius JSON: {err}") from err
 

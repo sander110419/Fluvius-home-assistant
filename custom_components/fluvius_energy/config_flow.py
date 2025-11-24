@@ -40,6 +40,7 @@ from .const import (
     METER_TYPE_GAS,
     GAS_SUPPORTED_GRANULARITY,
 )
+from .http import async_create_fluvius_session
 
 DATA_SCHEMA = vol.Schema(
     {
@@ -130,7 +131,9 @@ class FluviusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(step_id=step_id, data_schema=schema, errors=errors)
 
     async def _async_validate_input(self, hass: HomeAssistant, data: Dict[str, Any]) -> None:
+        session = async_create_fluvius_session(hass)
         client = FluviusApiClient(
+            session=session,
             email=data[CONF_EMAIL],
             password=data[CONF_PASSWORD],
             ean=data[CONF_EAN],
@@ -138,7 +141,7 @@ class FluviusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             meter_type=data.get(CONF_METER_TYPE, DEFAULT_METER_TYPE),
         )
         try:
-            await hass.async_add_executor_job(client.fetch_daily_summaries)
+            await client.fetch_daily_summaries()
         except FluviusApiError as err:
             message = str(err).lower()
             if any(key in message for key in ("auth", "password", "credentials")):

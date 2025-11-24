@@ -43,7 +43,7 @@ class FluviusEnergyDataUpdateCoordinator(DataUpdateCoordinator[FluviusCoordinato
 
     async def _async_update_data(self) -> FluviusCoordinatorData:
         try:
-            summaries = await self.hass.async_add_executor_job(self._client.fetch_daily_summaries)
+            summaries = await self._client.fetch_daily_summaries()
         except FluviusApiError as err:
             raise UpdateFailed(str(err)) from err
 

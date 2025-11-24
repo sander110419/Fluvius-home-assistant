@@ -4,13 +4,16 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import logging
 import re
 import secrets
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 from urllib.parse import parse_qs, urlencode, urljoin, urlparse
 
-import requests
+import aiohttp
+
+LOGGER = logging.getLogger(__name__)
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -34,22 +37,15 @@ class PKCEPair:
     challenge: str
 
 
-class FluviusHttpAuthenticator:
-    """Pure-HTTP PKCE client used by both the CLI and HA integration."""
+class AsyncFluviusHttpAuthenticator:
+    """Async PKCE client used by both the CLI and HA integration."""
 
-    def __init__(self, *, verbose: bool = False) -> None:
+    def __init__(self, session: aiohttp.ClientSession, *, verbose: bool = False) -> None:
         self.verbose = verbose
-        self.session = requests.Session()
-        self.session.headers.update(
-            {
-                "User-Agent": USER_AGENT,
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Accept-Language": "nl-NL,nl;q=0.9,en-US;q=0.8,en;q=0.7",
-            }
-        )
+        self.session = session
 
-    def authenticate(self, username: str, password: str, remember_me: bool = False) -> Dict[str, Any]:
-        metadata = self._fetch_msal_metadata()
+    async def authenticate(self, username: str, password: str, remember_me: bool = False) -> Dict[str, Any]:
+        metadata = await self._fetch_msal_metadata()
         authority = (metadata.get("authority") or metadata.get("auth", {}).get("authority") or DEFAULT_AUTHORITY).rstrip("/")
         client_id = metadata.get("clientId") or metadata.get("auth", {}).get("clientId")
         if not client_id:
@@ -63,11 +59,13 @@ class FluviusHttpAuthenticator:
         authorize_url = self._build_authorize_url(authority, client_id, redirect_uri, scopes, pkce.challenge, state, nonce, username)
 
         self._log("Fetching B2C authorize page...")
-        auth_resp = self.session.get(authorize_url, timeout=TIMEOUT)
-        auth_resp.raise_for_status()
+        async with self.session.get(authorize_url, timeout=TIMEOUT) as auth_resp:
+            auth_resp.raise_for_status()
+            text = await auth_resp.text()
+            current_url = str(auth_resp.url)
 
-        settings = _extract_json_variable("SETTINGS", auth_resp.text)
-        sa_fields = _extract_json_variable("SA_FIELDS", auth_resp.text)
+        settings = _extract_json_variable("SETTINGS", text)
+        sa_fields = _extract_json_variable("SA_FIELDS", text)
         login_field, password_field = self._resolve_attribute_fields(sa_fields)
 
         csrf_token = settings.get("csrf")
@@ -77,9 +75,9 @@ class FluviusHttpAuthenticator:
         if not all([csrf_token, trans_id, policy, tenant_path]):
             raise FluviusAuthError("B2C settings payload is missing required keys.")
 
-        tenant_base = self._build_tenant_base(auth_resp.url, tenant_path)
+        tenant_base = self._build_tenant_base(current_url, tenant_path)
         self._log("Submitting credentials to SelfAsserted endpoint...")
-        self._submit_credentials(
+        await self._submit_credentials(
             tenant_base,
             login_field,
             password_field,
@@ -92,20 +90,20 @@ class FluviusHttpAuthenticator:
 
         self._log("Finalising session at CombinedSigninAndSignup/confirmed...")
         confirm_url = self._build_confirm_url(tenant_base, settings.get("api", "CombinedSigninAndSignup"), csrf_token, trans_id, policy, remember_me)
-        code, redirect_seen = self._follow_redirects_for_code(confirm_url, state, auth_resp.url)
+        code, redirect_seen = await self._follow_redirects_for_code(confirm_url, state, current_url)
         self._log("Exchanging authorization code for tokens...")
-        token_response = self._exchange_code_for_tokens(authority, client_id, redirect_uri or redirect_seen, scopes, pkce.verifier, code)
+        token_response = await self._exchange_code_for_tokens(authority, client_id, redirect_uri or redirect_seen, scopes, pkce.verifier, code)
         return token_response
 
     # -- helpers ---------------------------------------------------------
     def _log(self, message: str) -> None:
         if self.verbose:
-            print(message)
+            LOGGER.info(message)
 
-    def _fetch_msal_metadata(self) -> Dict[str, Any]:
-        resp = self.session.get(MSAL_CONFIG_URL, timeout=TIMEOUT)
-        resp.raise_for_status()
-        return resp.json()
+    async def _fetch_msal_metadata(self) -> Dict[str, Any]:
+        async with self.session.get(MSAL_CONFIG_URL, timeout=TIMEOUT) as resp:
+            resp.raise_for_status()
+            return await resp.json()
 
     @staticmethod
     def _build_authorize_url(
@@ -161,7 +159,7 @@ class FluviusHttpAuthenticator:
             return tenant_path.rstrip("/")
         return urljoin(origin + "/", tenant_path.lstrip("/")).rstrip("/")
 
-    def _submit_credentials(
+    async def _submit_credentials(
         self,
         tenant_base: str,
         login_field: str,
@@ -188,9 +186,23 @@ class FluviusHttpAuthenticator:
             "Referer": tenant_base,
             "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
         }
-        resp = self.session.post(submit_url, params=params, data=payload, headers=headers, timeout=TIMEOUT)
-        resp.raise_for_status()
-        data = resp.json()
+        payload_encoded = urlencode(payload)
+        async with self.session.post(
+            submit_url,
+            params=params,
+            data=payload_encoded,
+            headers=headers,
+            timeout=TIMEOUT,
+        ) as resp:
+            resp.raise_for_status()
+            try:
+                data = await resp.json()
+            except aiohttp.ContentTypeError:
+                text = await resp.text()
+                try:
+                    data = json.loads(text)
+                except json.JSONDecodeError as exc:  # pragma: no cover - defensive log
+                    raise FluviusAuthError(f"Credential submission returned non-JSON: {text[:200]}") from exc
         status_value = data.get("status")
         if str(status_value) not in {"200", "success"}:
             raise FluviusAuthError(f"Credential submission failed: {data}")
@@ -211,14 +223,14 @@ class FluviusHttpAuthenticator:
         path_with_tokens = f"{base_path}{separator}{urlencode({'csrf_token': csrf_token, 'tx': trans_id})}"
         return f"{api_base}/{path_with_tokens}&{urlencode({'p': policy})}"
 
-    def _follow_redirects_for_code(self, start_url: str, expected_state: str, origin_url: str) -> Tuple[str, str]:
+    async def _follow_redirects_for_code(self, start_url: str, expected_state: str, origin_url: str) -> Tuple[str, str]:
         origin = self._extract_origin(origin_url)
         next_url = start_url
         for _ in range(6):
-            resp = self.session.get(next_url, allow_redirects=False, timeout=TIMEOUT)
-            if resp.status_code not in (301, 302, 303, 307, 308):
-                raise FluviusAuthError("Authorization pipeline did not redirect to redirect_uri")
-            location = resp.headers.get("Location")
+            async with self.session.get(next_url, allow_redirects=False, timeout=TIMEOUT) as resp:
+                if resp.status not in (301, 302, 303, 307, 308):
+                    raise FluviusAuthError("Authorization pipeline did not redirect to redirect_uri")
+                location = resp.headers.get("Location")
             if not location:
                 raise FluviusAuthError("Redirect response missing Location header")
             absolute = urljoin(origin + "/", location)
@@ -232,7 +244,7 @@ class FluviusHttpAuthenticator:
             next_url = absolute
         raise FluviusAuthError("Failed to capture authorization code after multiple redirects")
 
-    def _exchange_code_for_tokens(
+    async def _exchange_code_for_tokens(
         self,
         authority: str,
         client_id: str,
@@ -250,10 +262,11 @@ class FluviusHttpAuthenticator:
             "grant_type": "authorization_code",
             "code_verifier": code_verifier,
         }
-        resp = self.session.post(token_url, data=data, timeout=TIMEOUT)
-        if resp.status_code != 200:
-            raise FluviusAuthError(f"Token endpoint error ({resp.status_code}): {resp.text}")
-        return resp.json()
+        async with self.session.post(token_url, data=data, timeout=TIMEOUT) as resp:
+            if resp.status != 200:
+                text = await resp.text()
+                raise FluviusAuthError(f"Token endpoint error ({resp.status}): {text}")
+            return await resp.json()
 
     @staticmethod
     def _extract_origin(url: str) -> str:
@@ -321,9 +334,16 @@ def _normalise_scopes(metadata: Dict[str, Any]) -> str:
     return " ".join(flat)
 
 
-def get_bearer_token_http(email: str, password: str, remember_me: bool = False, verbose: bool = False) -> tuple[str, Dict[str, Any]]:
-    authenticator = FluviusHttpAuthenticator(verbose=verbose)
-    token_response = authenticator.authenticate(email, password, remember_me=remember_me)
+async def async_get_bearer_token(
+    session: aiohttp.ClientSession,
+    email: str,
+    password: str,
+    *,
+    remember_me: bool = False,
+    verbose: bool = False,
+) -> tuple[str, Dict[str, Any]]:
+    authenticator = AsyncFluviusHttpAuthenticator(session, verbose=verbose)
+    token_response = await authenticator.authenticate(email, password, remember_me=remember_me)
     access_token = token_response.get("access_token")
     if not access_token:
         raise FluviusAuthError("Token response does not contain an access_token")
