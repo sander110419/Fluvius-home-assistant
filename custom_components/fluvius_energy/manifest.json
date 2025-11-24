@@ -5,8 +5,8 @@
   "config_flow": true,
   "documentation": "https://github.com/sander110419/Fluvius-home-assistant/blob/main/README.md",
   "integration_type": "hub",
-  "issue_tracker": "https://github.com/sander110419/Fluvius-home-assistant/issues",
   "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/sander110419/Fluvius-home-assistant/issues",
   "quality_scale": "bronze",
   "requirements": ["requests>=2.31.0"],
   "version": "0.0.1"
