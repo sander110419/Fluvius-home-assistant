@@ -4,6 +4,7 @@ from __future__ import annotations
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.helpers import config_validation as cv
 
 from .api import FluviusApiClient
 from .const import (
@@ -29,6 +30,8 @@ from .const import (
 from .coordinator import FluviusEnergyDataUpdateCoordinator
 from .config_flow import FluviusOptionsFlowHandler
 from .store import FluviusEnergyStore
+
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 
 def _build_options(entry: ConfigEntry) -> dict:
