@@ -96,7 +96,6 @@ SENSOR_TYPES: tuple[FluviusEnergySensorEntityDescription, ...] = (
         translation_key="net_consumption_day",
         name="Fluvius net consumption (day)",
         metric="net_consumption",
-        device_class=SensorDeviceClass.ENERGY,
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         state_class=SensorStateClass.MEASUREMENT,
         suggested_display_precision=3,
