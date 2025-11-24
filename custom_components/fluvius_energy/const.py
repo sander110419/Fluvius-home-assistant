@@ -33,10 +33,6 @@ PLATFORMS: list[Platform] = [Platform.SENSOR]
 STORAGE_VERSION = 1
 STORAGE_KEY_TEMPLATE = "fluvius_energy_{entry_id}"
 
-DATA_CLIENT = "client"
-DATA_COORDINATOR = "coordinator"
-DATA_STORE = "store"
-
 LIFETIME_METRICS = (
     "consumption_high",
     "consumption_low",

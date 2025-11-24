@@ -16,9 +16,6 @@ from .const import (
     CONF_METER_TYPE,
     CONF_PASSWORD,
     CONF_TIMEZONE,
-    DATA_CLIENT,
-    DATA_COORDINATOR,
-    DATA_STORE,
     DEFAULT_DAYS_BACK,
     DEFAULT_GRANULARITY,
     DEFAULT_METER_TYPE,
@@ -29,6 +26,7 @@ from .const import (
 )
 from .coordinator import FluviusEnergyDataUpdateCoordinator
 from .config_flow import FluviusOptionsFlowHandler
+from .models import FluviusRuntimeData
 from .store import FluviusEnergyStore
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
@@ -82,11 +80,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     except Exception as err:  # pragma: no cover - defensive
         raise ConfigEntryNotReady(str(err)) from err
 
-    hass.data[DOMAIN][entry.entry_id] = {
-        DATA_CLIENT: client,
-        DATA_COORDINATOR: coordinator,
-        DATA_STORE: store,
-    }
+    entry.runtime_data = FluviusRuntimeData(client=client, coordinator=coordinator, store=store)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))
@@ -96,10 +90,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Tear down a config entry."""
 
-    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-    if unload_ok:
-        hass.data[DOMAIN].pop(entry.entry_id, None)
-    return unload_ok
+    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
 
 async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:

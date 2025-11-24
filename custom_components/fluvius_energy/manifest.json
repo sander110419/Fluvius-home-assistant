@@ -1,5 +1,5 @@
 {
-  "domain": "fluvius_energy",
+  "domain": "fluvius",
   "name": "Fluvius Energy",
   "codeowners": ["@sander110419"],
   "config_flow": true,

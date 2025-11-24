@@ -10,13 +10,10 @@ from .const import (
     CONF_EAN,
     CONF_METER_SERIAL,
     CONF_METER_TYPE,
-    DATA_COORDINATOR,
-    DATA_STORE,
     DEFAULT_METER_TYPE,
     DOMAIN,
 )
-from .coordinator import FluviusEnergyDataUpdateCoordinator
-from .store import FluviusEnergyStore
+from .models import FluviusRuntimeData
 
 
 async def async_get_config_entry_diagnostics(
@@ -25,9 +22,9 @@ async def async_get_config_entry_diagnostics(
 ) -> Dict[str, Any]:
     """Return diagnostics for a config entry without exposing secrets."""
 
-    domain_data = hass.data[DOMAIN][entry.entry_id]
-    coordinator: FluviusEnergyDataUpdateCoordinator = domain_data[DATA_COORDINATOR]
-    store: FluviusEnergyStore = domain_data[DATA_STORE]
+    runtime_data: FluviusRuntimeData = entry.runtime_data
+    coordinator = runtime_data.coordinator
+    store = runtime_data.store
     latest = coordinator.data.latest_summary if coordinator.data else None
 
     diagnostics: Dict[str, Any] = {

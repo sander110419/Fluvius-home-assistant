@@ -10,6 +10,13 @@
           "ean": "EAN number",
           "meter_serial": "Meter serial number",
           "meter_type": "Meter type"
+        },
+        "data_description": {
+          "email": "Use the same email address you provide on mijn.fluvius.be.",
+          "password": "Stored securely and exchanged for a short-lived Fluvius access token.",
+          "ean": "18-digit identifier printed on your utility bill (per meter).",
+          "meter_serial": "Matches the serial number shown in the Fluvius portal (for example 1SAG...).",
+          "meter_type": "Create one entry per meter and choose whether it is an electricity or a gas meter."
         }
       },
       "reauth_confirm": {
@@ -21,6 +28,13 @@
           "ean": "EAN number",
           "meter_serial": "Meter serial number",
           "meter_type": "Meter type"
+        },
+        "data_description": {
+          "email": "Update the email if your Fluvius login changed.",
+          "password": "Enter the new password so the integration can refresh its session.",
+          "ean": "Confirm the same EAN that this entry manages.",
+          "meter_serial": "Confirm the meter serial stored in Fluvius.",
+          "meter_type": "If you swapped hardware, pick the correct meter type before saving."
         }
       }
     },

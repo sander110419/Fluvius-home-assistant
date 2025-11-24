@@ -74,6 +74,15 @@ Changing any of these values triggers a config-entry reload.
 - Download diagnostics via **Settings → Devices & Services → Fluvius Energy → ... → Download diagnostics**. The payload includes the configured EAN, meter serial, and sanitized lifetime totals.
 - If Fluvius rejects your credentials later, Home Assistant automatically triggers the reauthentication flow. Supply the new email/password and the integration reloads itself.
 
+### Removal
+
+If you want to remove the Fluvius Energy integration:
+
+1. Open **Settings → Devices & Services**.
+2. Locate the Fluvius Energy card that corresponds to the meter you want to remove.
+3. Click **Delete** and confirm. Home Assistant will unload the platforms and drop the stored credentials and statistics cache for that entry.
+4. Optional: delete the `custom_components/fluvius_energy` folder from your Home Assistant configuration directory if you no longer plan to use the integration at all.
+
 ## Testing
 
 Install the Home Assistant dev environment and run:

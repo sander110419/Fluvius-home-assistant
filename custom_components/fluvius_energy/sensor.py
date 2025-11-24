@@ -17,8 +17,9 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import CONF_EAN, CONF_METER_SERIAL, DATA_COORDINATOR, DOMAIN
+from .const import CONF_EAN, CONF_METER_SERIAL, DOMAIN
 from .coordinator import FluviusCoordinatorData, FluviusEnergyDataUpdateCoordinator
+from .models import FluviusRuntimeData
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -111,8 +112,8 @@ async def async_setup_entry(
 ) -> None:
     """Set up the Fluvius sensors."""
 
-    data = hass.data[DOMAIN][entry.entry_id]
-    coordinator: FluviusEnergyDataUpdateCoordinator = data[DATA_COORDINATOR]
+    runtime_data: FluviusRuntimeData = entry.runtime_data
+    coordinator: FluviusEnergyDataUpdateCoordinator = runtime_data.coordinator
     ean = entry.data[CONF_EAN]
     meter_serial = entry.data[CONF_METER_SERIAL]
 
@@ -139,6 +140,7 @@ class FluviusEnergySensor(CoordinatorEntity[FluviusEnergyDataUpdateCoordinator],
         super().__init__(coordinator)
         self.entity_description = description
         self._attr_unique_id = f"{entry_id}_{description.key}"
+        self._attr_has_entity_name = True
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, ean)},
             manufacturer="Fluvius",

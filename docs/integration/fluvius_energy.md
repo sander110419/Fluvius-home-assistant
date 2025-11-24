@@ -60,6 +60,14 @@ Fluvius returns two readings per gas interval: volume in m³ and energy in kWh. 
 
 Gas measurements are released more slowly than electricity (typically 72 hours). To avoid missing late-arriving datapoints the integration always requests at least seven days of history for gas entries regardless of the configured lookback in the options flow.
 
+## Removal
+
+When you no longer need a Fluvius entry or want to uninstall the integration entirely:
+
+1. Go to **Settings → Devices & Services** in Home Assistant.
+2. Select the Fluvius Energy config entry you want to remove and choose **Delete**. This unloads the platforms and deletes cached credentials/statistics for that entry.
+3. If you want to fully remove the custom component, delete `custom_components/fluvius_energy` from your Home Assistant configuration directory and restart Home Assistant.
+
 ## Testing
 
 Basic config-flow tests live under `tests/components/fluvius_energy/` and exercise:
