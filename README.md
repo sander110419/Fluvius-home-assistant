@@ -8,6 +8,7 @@ This repository packages a Home Assistant custom integration that logs in to Mij
 - Explicit meter-type selection (electricity or gas) so polling and parsing can match Fluvius' delivery cadence
 - Works with electricity and gas meters; gas payloads use the kWh values exposed by Fluvius and ignore duplicate m³ readings
 - Sensors declared with `state_class=total_increasing`, so they qualify for the Energy dashboard
+- Monthly peak power sensor for electricity meters to feed capacity-tariff automations
 - Options flow to tweak timezone, lookback window, and Fluvius granularity without re-adding the entry
 - Diagnostics endpoint for privacy-safe troubleshooting
 - Basic config-flow tests to keep regressions in check
@@ -66,6 +67,7 @@ Changing any of these values triggers a config-entry reload.
    - `sensor.fluvius_injection_total` → Return to grid / production
 3. Optional sensors for tariff-specific reporting: `consumption_high`, `consumption_low`, `injection_high`, `injection_low`.
 4. A non-cumulative `sensor.fluvius_net_consumption_day` is available for daily comparisons but is not used directly in the Energy dashboard.
+5. Electricity meters also expose `sensor.fluvius_peak_power` (kW) so you can automate Belgium's capacity tariff follow-up.
 
 ### Diagnostics and Reauthentication
 - Gas data is only published by Fluvius after ~72 hours. The integration automatically fetches at least the past 7 days for gas meters so newly released measurements are not missed.

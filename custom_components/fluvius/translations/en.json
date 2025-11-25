@@ -70,6 +70,9 @@
       },
       "net_consumption_day": {
         "name": "Net consumption (day)"
+      },
+      "peak_power": {
+        "name": "Peak power"
       }
     }
   }

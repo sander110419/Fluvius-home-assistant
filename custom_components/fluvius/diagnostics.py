@@ -40,6 +40,16 @@ async def async_get_config_entry_diagnostics(
             "end": latest.end.isoformat() if latest else None,
             "metrics": latest.metrics if latest else {},
         },
+        "peak_measurements": [
+            {
+                "period_start": peak.period_start.isoformat(),
+                "period_end": peak.period_end.isoformat(),
+                "spike_start": peak.spike_start.isoformat(),
+                "spike_end": peak.spike_end.isoformat(),
+                "value_kw": peak.value_kw,
+            }
+            for peak in (coordinator.data.peak_measurements if coordinator.data else [])
+        ],
         "store_state": {
             "last_day": store.get_last_day_id(),
         },

@@ -8,7 +8,7 @@ from typing import Dict
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .api import FluviusApiClient, FluviusApiError, FluviusDailySummary
+from .api import FluviusApiClient, FluviusApiError, FluviusDailySummary, FluviusPeakMeasurement
 from .const import DEFAULT_UPDATE_INTERVAL
 from .store import FluviusEnergyStore
 
@@ -21,6 +21,7 @@ class FluviusCoordinatorData:
 
     latest_summary: FluviusDailySummary | None
     lifetime_totals: Dict[str, float]
+    peak_measurements: list[FluviusPeakMeasurement]
 
 
 class FluviusEnergyDataUpdateCoordinator(DataUpdateCoordinator[FluviusCoordinatorData]):
@@ -43,7 +44,7 @@ class FluviusEnergyDataUpdateCoordinator(DataUpdateCoordinator[FluviusCoordinato
 
     async def _async_update_data(self) -> FluviusCoordinatorData:
         try:
-            summaries = await self._client.fetch_daily_summaries()
+            summaries, peak_measurements = await self._client.fetch_daily_summaries_with_spikes()
         except FluviusApiError as err:
             raise UpdateFailed(str(err)) from err
 
@@ -52,4 +53,8 @@ class FluviusEnergyDataUpdateCoordinator(DataUpdateCoordinator[FluviusCoordinato
 
         totals = self._store.get_lifetime_totals()
         latest_summary = summaries[-1] if summaries else None
-        return FluviusCoordinatorData(latest_summary=latest_summary, lifetime_totals=totals)
+        return FluviusCoordinatorData(
+            latest_summary=latest_summary,
+            lifetime_totals=totals,
+            peak_measurements=peak_measurements,
+        )

@@ -53,6 +53,7 @@ All energy sensors report `state_class=total_increasing`, `device_class=energy`,
 - Injection (high tariff)
 - Injection (low tariff)
 - Net consumption for the latest day
+- Monthly peak power in kW (capacity tariff)
 
 ### Gas meters
 

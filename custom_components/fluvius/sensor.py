@@ -11,13 +11,21 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfEnergy
+from homeassistant.const import UnitOfEnergy, UnitOfPower
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import CONF_EAN, CONF_METER_SERIAL, DOMAIN
+from .api import FluviusPeakMeasurement
+from .const import (
+    CONF_EAN,
+    CONF_METER_SERIAL,
+    CONF_METER_TYPE,
+    DEFAULT_METER_TYPE,
+    DOMAIN,
+    METER_TYPE_ELECTRICITY,
+)
 from .coordinator import FluviusCoordinatorData, FluviusEnergyDataUpdateCoordinator
 from .models import FluviusRuntimeData
 
@@ -103,6 +111,16 @@ SENSOR_TYPES: tuple[FluviusEnergySensorEntityDescription, ...] = (
     ),
 )
 
+PEAK_POWER_DESCRIPTION = SensorEntityDescription(
+    key="peak_power",
+    translation_key="peak_power",
+    name="Fluvius peak power",
+    device_class=SensorDeviceClass.POWER,
+    native_unit_of_measurement=UnitOfPower.KILO_WATT,
+    state_class=SensorStateClass.MEASUREMENT,
+    suggested_display_precision=3,
+)
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -115,11 +133,16 @@ async def async_setup_entry(
     coordinator: FluviusEnergyDataUpdateCoordinator = runtime_data.coordinator
     ean = entry.data[CONF_EAN]
     meter_serial = entry.data[CONF_METER_SERIAL]
+    meter_type = entry.data.get(CONF_METER_TYPE, DEFAULT_METER_TYPE)
 
     entities = [
         FluviusEnergySensor(description, coordinator, entry.entry_id, ean, meter_serial)
         for description in SENSOR_TYPES
     ]
+    if meter_type == METER_TYPE_ELECTRICITY:
+        entities.append(
+            FluviusPeakPowerSensor(PEAK_POWER_DESCRIPTION, coordinator, entry.entry_id, ean, meter_serial)
+        )
     async_add_entities(entities)
 
 
@@ -177,3 +200,59 @@ class FluviusEnergySensor(CoordinatorEntity[FluviusEnergyDataUpdateCoordinator],
         if not self.entity_description.is_lifetime:
             attributes["latest_net_consumption"] = round(latest.metrics.get("net_consumption", 0.0), 3)
         return attributes
+
+
+class FluviusPeakPowerSensor(CoordinatorEntity[FluviusEnergyDataUpdateCoordinator], SensorEntity):
+    """Expose the monthly peak power reported by Fluvius."""
+
+    entity_description: SensorEntityDescription
+
+    def __init__(
+        self,
+        description: SensorEntityDescription,
+        coordinator: FluviusEnergyDataUpdateCoordinator,
+        entry_id: str,
+        ean: str,
+        meter_serial: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self.entity_description = description
+        self._attr_unique_id = f"{entry_id}_{description.key}"
+        self._attr_has_entity_name = True
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, ean)},
+            manufacturer="Fluvius",
+            model=meter_serial,
+            name=f"Fluvius meter {meter_serial}",
+        )
+
+    def _latest_peak(self) -> FluviusPeakMeasurement | None:
+        data: FluviusCoordinatorData | None = self.coordinator.data
+        if not data or not data.peak_measurements:
+            return None
+        return data.peak_measurements[-1]
+
+    @property
+    def native_value(self) -> Optional[float]:
+        latest = self._latest_peak()
+        if not latest:
+            return None
+        return round(latest.value_kw, 3)
+
+    @property
+    def extra_state_attributes(self) -> Optional[Dict[str, Any]]:
+        data: FluviusCoordinatorData | None = self.coordinator.data
+        latest = self._latest_peak()
+        if not data or not latest:
+            return None
+        history = {
+            peak.period_start.strftime("%Y-%m"): round(peak.value_kw, 3)
+            for peak in data.peak_measurements[-12:]
+        }
+        return {
+            "period_start": latest.period_start.isoformat(),
+            "period_end": latest.period_end.isoformat(),
+            "spike_window_start": latest.spike_start.isoformat(),
+            "spike_window_end": latest.spike_end.isoformat(),
+            "monthly_peaks_kw": history,
+        }

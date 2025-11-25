@@ -46,6 +46,17 @@ class FluviusDailySummary:
     metrics: Dict[str, float]
 
 
+@dataclass(slots=True)
+class FluviusPeakMeasurement:
+    """Container describing the monthly peak power measurement."""
+
+    period_start: datetime
+    period_end: datetime
+    spike_start: datetime
+    spike_end: datetime
+    value_kw: float
+
+
 class FluviusApiClient:
     """Thin wrapper around the HTTP helpers used by the CLI script."""
 
@@ -76,16 +87,38 @@ class FluviusApiClient:
     async def fetch_daily_summaries(self) -> List[FluviusDailySummary]:
         """Retrieve the most recent consumption data and return parsed summaries."""
 
-        payload = await self._fetch_raw_consumption()
+        summaries, _ = await self._fetch_summaries_and_spikes(include_spikes=False)
+        return summaries
+
+    async def fetch_daily_summaries_with_spikes(self) -> tuple[
+        List[FluviusDailySummary],
+        List[FluviusPeakMeasurement],
+    ]:
+        """Return both the daily summaries and the monthly peak power values."""
+
+        return await self._fetch_summaries_and_spikes(include_spikes=True)
+
+    async def _fetch_summaries_and_spikes(
+        self,
+        *,
+        include_spikes: bool,
+    ) -> tuple[List[FluviusDailySummary], List[FluviusPeakMeasurement]]:
+        access_token = await self._async_get_access_token()
+        payload = await self._fetch_raw_consumption(access_token)
         summaries = self._summaries_from_payload(payload)
         if not summaries:
             raise FluviusApiError("No consumption rows returned by the Fluvius API")
-        return summaries
+
+        peaks: List[FluviusPeakMeasurement] = []
+        if include_spikes and self._meter_type != METER_TYPE_GAS:
+            spike_payload = await self._fetch_raw_spikes(access_token)
+            peaks = self._spikes_from_payload(spike_payload)
+        return summaries, peaks
 
     # ------------------------------------------------------------------
     # HTTP helpers
     # ------------------------------------------------------------------
-    async def _fetch_raw_consumption(self) -> List[Dict[str, Any]]:
+    async def _async_get_access_token(self) -> str:
         try:
             access_token, _ = await async_get_bearer_token(
                 self._session,
@@ -101,7 +134,9 @@ class FluviusApiClient:
 
         if not access_token:
             raise FluviusApiError("Authentication response did not include an access token")
+        return access_token
 
+    async def _fetch_raw_consumption(self, access_token: str) -> List[Dict[str, Any]]:
         history_params = self._build_history_range()
         granularity = str(self._options.get(CONF_GRANULARITY, DEFAULT_GRANULARITY))
         if self._meter_type == METER_TYPE_GAS:
@@ -145,6 +180,42 @@ class FluviusApiClient:
             "historyUntil": end_date.isoformat(timespec="milliseconds"),
         }
 
+    async def _fetch_raw_spikes(self, access_token: str) -> List[Dict[str, Any]]:
+        params = {
+            **self._build_spike_history_range(),
+            "asServiceProvider": "false",
+            "meterSerialNumber": self._meter_serial,
+        }
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Accept": "application/json",
+            "User-Agent": "Mozilla/5.0 (HomeAssistant-FluviusEnergy)",
+        }
+        url = f"https://mijn.fluvius.be/verbruik/api/meter-measurement-spikes/{self._ean}"
+
+        try:
+            async with self._session.get(url, params=params, headers=headers, timeout=30) as response:
+                response.raise_for_status()
+                data: Any = await response.json()
+        except aiohttp.ClientError as err:
+            raise FluviusApiError(f"Peak power API call failed: {err}") from err
+        except ValueError as err:  # pragma: no cover - defensive
+            raise FluviusApiError(f"Failed to decode Fluvius JSON: {err}") from err
+
+        if not isinstance(data, list):
+            raise FluviusApiError("Fluvius spike API returned an unexpected payload (expected list)")
+        return data
+
+    def _build_spike_history_range(self) -> Dict[str, str]:
+        tzinfo = self._resolve_timezone(self._options.get(CONF_TIMEZONE, DEFAULT_TIMEZONE))
+        local_now = datetime.now(tzinfo)
+        start_date = local_now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+        end_date = local_now.replace(hour=23, minute=59, second=59, microsecond=999000)
+        return {
+            "historyFrom": start_date.isoformat(timespec="milliseconds"),
+            "historyUntil": end_date.isoformat(timespec="milliseconds"),
+        }
+
     def _resolve_timezone(self, tz_name: Optional[str]):
         if tz_name and ZoneInfo is not None:
             try:
@@ -170,6 +241,31 @@ class FluviusApiClient:
                 summaries.append(summary)
         summaries.sort(key=lambda item: item.start)
         return summaries
+
+    def _spikes_from_payload(self, payload: List[Dict[str, Any]]) -> List[FluviusPeakMeasurement]:
+        peaks: List[FluviusPeakMeasurement] = []
+        for chunk in payload:
+            period_start = self._parse_datetime(chunk.get("d"))
+            period_end = self._parse_datetime(chunk.get("de")) or period_start
+            if not period_start or not period_end:
+                continue
+            for reading in chunk.get("v", []) or []:
+                value = self._safe_float(reading.get("v"))
+                spike_start = self._parse_datetime(reading.get("sst"))
+                spike_end = self._parse_datetime(reading.get("set"))
+                if spike_start is None or spike_end is None:
+                    continue
+                peaks.append(
+                    FluviusPeakMeasurement(
+                        period_start=period_start,
+                        period_end=period_end,
+                        spike_start=spike_start,
+                        spike_end=spike_end,
+                        value_kw=value,
+                    )
+                )
+        peaks.sort(key=lambda item: item.period_start)
+        return peaks
 
     def _summarize_day(self, day_data: Dict[str, Any]) -> Optional[FluviusDailySummary]:
         start = self._parse_datetime(day_data.get("d"))
@@ -219,10 +315,12 @@ class FluviusApiClient:
         """Return the metric bucket that should be incremented for a reading."""
 
         is_high_tariff = tariff == 1
-        if direction in (0, 1):
+        if direction == 0:
             return "consumption_high" if is_high_tariff else "consumption_low"
+        if direction == 1:
+            return "consumption_high" if is_high_tariff else "injection_high"
         if direction == 2:
-            return "injection_high" if is_high_tariff else "injection_low"
+            return "consumption_low" if is_high_tariff else "injection_low"
         return None
 
     @staticmethod

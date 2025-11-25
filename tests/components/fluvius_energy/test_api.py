@@ -57,7 +57,7 @@ def test_gas_day_uses_kwh_values_only():
     assert summary.metrics["injection_total"] == 0.0
 
 
-def test_direction_mapping_handles_injection_low_tariff():
+def test_direction_mapping_handles_tariffs():
     """Verify that direction/tariff combinations map to the right metric."""
 
     client = _make_client()
@@ -66,16 +66,45 @@ def test_direction_mapping_handles_injection_low_tariff():
             "d": "2025-11-16T23:00:00Z",
             "de": "2025-11-17T23:00:00Z",
             "v": [
-                {"dc": 1, "t": 2, "v": 4.5, "u": 3},
-                {"dc": 2, "t": 2, "v": 1.25, "u": 3},
+                {"dc": 1, "t": 1, "v": 8.0, "u": 3},  # consumption high
+                {"dc": 1, "t": 2, "v": 2.0, "u": 3},  # injection high
+                {"dc": 2, "t": 1, "v": 4.5, "u": 3},  # consumption low
+                {"dc": 2, "t": 2, "v": 1.25, "u": 3},  # injection low
             ],
         }
     )
 
     assert summary is not None
+    assert summary.metrics["consumption_high"] == pytest.approx(8.0)
     assert summary.metrics["consumption_low"] == pytest.approx(4.5)
+    assert summary.metrics["injection_high"] == pytest.approx(2.0)
     assert summary.metrics["injection_low"] == pytest.approx(1.25)
-    assert summary.metrics["net_consumption"] == pytest.approx(4.5 - 1.25)
+    assert summary.metrics["net_consumption"] == pytest.approx((8.0 + 4.5) - (2.0 + 1.25))
+
+
+def test_peak_payload_parsing():
+    """Ensure the peak spike payload is converted to dataclasses."""
+
+    client = _make_client()
+    peaks = client._spikes_from_payload(  # pylint: disable=protected-access
+        [
+            {
+                "d": "2024-01-01T00:00:00Z",
+                "de": "2024-01-31T23:00:00Z",
+                "v": [
+                    {
+                        "v": 5.432,
+                        "sst": "2024-01-14T11:00:00Z",
+                        "set": "2024-01-14T11:15:00Z",
+                    }
+                ],
+            }
+        ]
+    )
+
+    assert len(peaks) == 1
+    assert peaks[0].value_kw == pytest.approx(5.432)
+    assert peaks[0].spike_start.isoformat() == "2024-01-14T11:00:00+00:00"
 
 
 def test_gas_history_range_enforces_minimum(monkeypatch):
