@@ -36,6 +36,24 @@
           "meter_serial": "Confirm the meter serial stored in Fluvius.",
           "meter_type": "If you swapped hardware, pick the correct meter type before saving."
         }
+      },
+      "options": {
+        "title": "Fluvius Options",
+        "description": "Configure history window, granularity, meter type, and gas unit.",
+        "data": {
+          "timezone": "Timezone",
+          "days_back": "Days back",
+          "granularity": "Granularity",
+          "meter_type": "Meter type",
+          "gas_unit": "Gas unit"
+        },
+        "data_description": {
+          "timezone": "Used to build the date range when requesting history from Fluvius.",
+          "days_back": "Number of days to fetch per refresh. Gas meters always request at least seven days.",
+          "granularity": "Fluvius API granularity code (3 quarter-hour, 4 daily). Gas meters always use daily.",
+          "meter_type": "Choose whether this entry targets an electricity or gas meter.",
+          "gas_unit": "For gas meters, pick whether to store energy (kWh) or volume (m3)."
+        }
       }
     },
     "error": {

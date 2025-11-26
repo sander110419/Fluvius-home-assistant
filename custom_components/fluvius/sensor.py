@@ -1,7 +1,7 @@
 """Sensor platform for the Fluvius Energy integration."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Dict, Optional
 
 from homeassistant.components.sensor import (
@@ -11,7 +11,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfEnergy, UnitOfPower
+from homeassistant.const import UnitOfEnergy, UnitOfPower, UnitOfVolume
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -20,11 +20,15 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .api import FluviusPeakMeasurement
 from .const import (
     CONF_EAN,
+    CONF_GAS_UNIT,
     CONF_METER_SERIAL,
     CONF_METER_TYPE,
+    DEFAULT_GAS_UNIT,
     DEFAULT_METER_TYPE,
     DOMAIN,
     METER_TYPE_ELECTRICITY,
+    METER_TYPE_GAS,
+    GAS_UNIT_CUBIC_METERS,
 )
 from .coordinator import FluviusCoordinatorData, FluviusEnergyDataUpdateCoordinator
 from .models import FluviusRuntimeData
@@ -134,10 +138,23 @@ async def async_setup_entry(
     ean = entry.data[CONF_EAN]
     meter_serial = entry.data[CONF_METER_SERIAL]
     meter_type = entry.data.get(CONF_METER_TYPE, DEFAULT_METER_TYPE)
+    gas_unit = entry.options.get(CONF_GAS_UNIT, DEFAULT_GAS_UNIT)
+    use_gas_volume = meter_type == METER_TYPE_GAS and gas_unit == GAS_UNIT_CUBIC_METERS
+
+    descriptions = SENSOR_TYPES
+    if use_gas_volume:
+        descriptions = [
+            replace(
+                description,
+                device_class=SensorDeviceClass.GAS,
+                native_unit_of_measurement=UnitOfVolume.CUBIC_METERS,
+            )
+            for description in SENSOR_TYPES
+        ]
 
     entities = [
         FluviusEnergySensor(description, coordinator, entry.entry_id, ean, meter_serial)
-        for description in SENSOR_TYPES
+        for description in descriptions
     ]
     if meter_type == METER_TYPE_ELECTRICITY:
         entities.append(

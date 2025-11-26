@@ -6,7 +6,7 @@ from typing import Dict, Optional
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 
-from .const import LIFETIME_METRICS, STORAGE_KEY_TEMPLATE, STORAGE_VERSION
+from .const import GAS_UNIT_KWH, LIFETIME_METRICS, STORAGE_KEY_TEMPLATE, STORAGE_VERSION
 
 MAX_STORED_DAYS = 60
 
@@ -14,17 +14,20 @@ MAX_STORED_DAYS = 60
 class FluviusEnergyStore:
     """Wrap Home Assistant Store helper to accumulate total energy values."""
 
-    def __init__(self, hass: HomeAssistant, entry_id: str) -> None:
+    def __init__(self, hass: HomeAssistant, entry_id: str, unit: str) -> None:
         key = STORAGE_KEY_TEMPLATE.format(entry_id=entry_id)
         self._store = Store(hass, STORAGE_VERSION, key)
+        self._unit = unit
         self._data: Dict[str, Dict] | None = None
 
     async def async_load(self) -> None:
         data = await self._store.async_load()
-        if not data:
-            data = {"days": {}, "totals": {}, "last_day": None}
+        stored_unit = (data or {}).get("unit", GAS_UNIT_KWH)
+        if not data or stored_unit != self._unit:
+            data = {"days": {}, "totals": {}, "last_day": None, "unit": self._unit}
         for metric in LIFETIME_METRICS:
             data["totals"].setdefault(metric, 0.0)
+        data.setdefault("unit", self._unit)
         self._data = data
 
     async def async_process_summary(self, summary_day_id: str, metrics: Dict[str, float]) -> None:

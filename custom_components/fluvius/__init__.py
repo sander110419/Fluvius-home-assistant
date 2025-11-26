@@ -12,16 +12,20 @@ from .const import (
     CONF_EMAIL,
     CONF_EAN,
     CONF_GRANULARITY,
+    CONF_GAS_UNIT,
     CONF_METER_SERIAL,
     CONF_METER_TYPE,
     CONF_PASSWORD,
     CONF_TIMEZONE,
     DEFAULT_DAYS_BACK,
     DEFAULT_GRANULARITY,
+    DEFAULT_GAS_UNIT,
     DEFAULT_METER_TYPE,
     DEFAULT_REMEMBER_ME,
     DEFAULT_TIMEZONE,
     DOMAIN,
+    GAS_UNIT_KWH,
+    METER_TYPE_GAS,
     PLATFORMS,
 )
 from .coordinator import FluviusEnergyDataUpdateCoordinator
@@ -37,6 +41,7 @@ def _build_options(entry: ConfigEntry) -> dict:
         CONF_TIMEZONE: entry.options.get(CONF_TIMEZONE, DEFAULT_TIMEZONE),
         CONF_DAYS_BACK: entry.options.get(CONF_DAYS_BACK, DEFAULT_DAYS_BACK),
         CONF_GRANULARITY: entry.options.get(CONF_GRANULARITY, DEFAULT_GRANULARITY),
+        CONF_GAS_UNIT: entry.options.get(CONF_GAS_UNIT, DEFAULT_GAS_UNIT),
     }
     return options
 
@@ -72,7 +77,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         options=options,
     )
 
-    store = FluviusEnergyStore(hass, entry.entry_id)
+    store_unit = options.get(CONF_GAS_UNIT, DEFAULT_GAS_UNIT)
+    if meter_type != METER_TYPE_GAS:
+        store_unit = GAS_UNIT_KWH
+    store = FluviusEnergyStore(hass, entry.entry_id, store_unit)
     await store.async_load()
 
     coordinator = FluviusEnergyDataUpdateCoordinator(hass, client, store)
@@ -98,6 +106,3 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     await hass.config_entries.async_reload(entry.entry_id)
-
-
-

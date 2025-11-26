@@ -11,13 +11,16 @@ from .const import (
     ALL_METRICS,
     CONF_DAYS_BACK,
     CONF_GRANULARITY,
+    CONF_GAS_UNIT,
     CONF_TIMEZONE,
     DEFAULT_DAYS_BACK,
     DEFAULT_GRANULARITY,
+    DEFAULT_GAS_UNIT,
     DEFAULT_METER_TYPE,
     DEFAULT_TIMEZONE,
     GAS_MIN_LOOKBACK_DAYS,
     GAS_SUPPORTED_GRANULARITY,
+    GAS_UNIT_CUBIC_METERS,
     METER_TYPE_GAS,
 )
 from .auth import FluviusAuthError, async_get_bearer_token
@@ -30,6 +33,7 @@ except ImportError:  # pragma: no cover - Windows without tzdata
 
 
 CUBIC_METER_UNIT_CODE = 5
+KILO_WATT_HOUR_UNIT_CODE = 3
 
 
 class FluviusApiError(RuntimeError):
@@ -233,6 +237,16 @@ class FluviusApiClient:
     # ------------------------------------------------------------------
     # Payload parsing helpers
     # ------------------------------------------------------------------
+    def _target_unit_code(self) -> int | None:
+        """Return the unit code that should be processed for this entry."""
+
+        if self._meter_type != METER_TYPE_GAS:
+            return None
+        gas_unit = str(self._options.get(CONF_GAS_UNIT, DEFAULT_GAS_UNIT))
+        if gas_unit == GAS_UNIT_CUBIC_METERS:
+            return CUBIC_METER_UNIT_CODE
+        return KILO_WATT_HOUR_UNIT_CODE
+
     def _summaries_from_payload(self, payload: List[Dict[str, Any]]) -> List[FluviusDailySummary]:
         summaries: List[FluviusDailySummary] = []
         for day_data in payload:
@@ -273,6 +287,7 @@ class FluviusApiClient:
             return None
         end = self._parse_datetime(day_data.get("de")) or (start + timedelta(days=1))
         metrics: Dict[str, float] = {metric: 0.0 for metric in ALL_METRICS}
+        target_unit = self._target_unit_code()
 
         for reading in day_data.get("v", []) or []:
             direction = self._safe_int(reading.get("dc"))
@@ -280,9 +295,12 @@ class FluviusApiClient:
             unit = self._safe_int(reading.get("u"))
             value = self._safe_float(reading.get("v"))
 
-            if unit == CUBIC_METER_UNIT_CODE:
-                # Gas meters return both m³ and kWh. Ignore the volume duplicate so
-                # Home Assistant sensors keep reporting energy in kWh.
+            if target_unit is not None and unit != target_unit:
+                # Skip duplicate gas readings in the non-selected unit.
+                continue
+            if target_unit is None and unit == CUBIC_METER_UNIT_CODE:
+                # Gas meters return both m3 and kWh. Skip the volume reading when
+                # keeping the default energy-based sensors.
                 continue
 
             metric_key = self._metric_from_reading(direction, tariff)

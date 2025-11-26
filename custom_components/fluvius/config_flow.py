@@ -27,11 +27,13 @@ from .const import (
     CONF_EMAIL,
     CONF_EAN,
     CONF_GRANULARITY,
+    CONF_GAS_UNIT,
     CONF_METER_SERIAL,
     CONF_METER_TYPE,
     CONF_PASSWORD,
     CONF_TIMEZONE,
     DEFAULT_DAYS_BACK,
+    DEFAULT_GAS_UNIT,
     DEFAULT_GRANULARITY,
     DEFAULT_METER_TYPE,
     DEFAULT_TIMEZONE,
@@ -39,6 +41,8 @@ from .const import (
     METER_TYPE_ELECTRICITY,
     METER_TYPE_GAS,
     GAS_SUPPORTED_GRANULARITY,
+    GAS_UNIT_CUBIC_METERS,
+    GAS_UNIT_KWH,
 )
 from .http import async_create_fluvius_session
 
@@ -163,13 +167,18 @@ class FluviusOptionsFlowHandler(config_entries.OptionsFlow):
     async def async_step_init(self, user_input: Optional[Dict[str, Any]] = None) -> FlowResult:
         current_meter_type = self._entry.data.get(CONF_METER_TYPE, DEFAULT_METER_TYPE)
         current_granularity = self._entry.options.get(CONF_GRANULARITY, DEFAULT_GRANULARITY)
+        current_gas_unit = self._entry.options.get(CONF_GAS_UNIT, DEFAULT_GAS_UNIT)
         if current_meter_type == METER_TYPE_GAS:
             current_granularity = GAS_SUPPORTED_GRANULARITY
 
         if user_input is not None:
             new_meter_type = user_input.pop(CONF_METER_TYPE, current_meter_type)
+            gas_unit = user_input.pop(CONF_GAS_UNIT, current_gas_unit)
             if new_meter_type == METER_TYPE_GAS:
                 user_input[CONF_GRANULARITY] = GAS_SUPPORTED_GRANULARITY
+                user_input[CONF_GAS_UNIT] = gas_unit
+            else:
+                user_input.pop(CONF_GAS_UNIT, None)
             if new_meter_type != current_meter_type:
                 self.hass.config_entries.async_update_entry(
                     self._entry,
@@ -185,41 +194,52 @@ class FluviusOptionsFlowHandler(config_entries.OptionsFlow):
         if current_meter_type == METER_TYPE_GAS:
             granularity_options = [SelectOptionDict(value=GAS_SUPPORTED_GRANULARITY, label="Daily")]
 
-        schema = vol.Schema(
-            {
-                vol.Required(
-                    CONF_TIMEZONE,
-                    default=self._entry.options.get(CONF_TIMEZONE, DEFAULT_TIMEZONE),
-                ): TextSelector(TextSelectorConfig(type=TextSelectorType.TEXT)),
-                vol.Required(
-                    CONF_DAYS_BACK,
-                    default=self._entry.options.get(CONF_DAYS_BACK, DEFAULT_DAYS_BACK),
-                ): NumberSelector(
-                    NumberSelectorConfig(min=1, max=31, mode="box"),
-                ),
-                vol.Required(
-                    CONF_GRANULARITY,
-                    default=current_granularity,
-                ): SelectSelector(
-                    SelectSelectorConfig(
-                        options=granularity_options,
-                        mode="dropdown",
-                    )
-                ),
-                vol.Required(
-                    CONF_METER_TYPE,
-                    default=current_meter_type,
-                ): SelectSelector(
-                    SelectSelectorConfig(
-                        options=[
-                            SelectOptionDict(value=METER_TYPE_ELECTRICITY, label="Electricity meter"),
-                            SelectOptionDict(value=METER_TYPE_GAS, label="Gas meter"),
-                        ],
-                        mode="dropdown",
-                    )
-                ),
-            }
-        )
+        schema_fields = {
+            vol.Required(
+                CONF_TIMEZONE,
+                default=self._entry.options.get(CONF_TIMEZONE, DEFAULT_TIMEZONE),
+            ): TextSelector(TextSelectorConfig(type=TextSelectorType.TEXT)),
+            vol.Required(
+                CONF_DAYS_BACK,
+                default=self._entry.options.get(CONF_DAYS_BACK, DEFAULT_DAYS_BACK),
+            ): NumberSelector(
+                NumberSelectorConfig(min=1, max=31, mode="box"),
+            ),
+            vol.Required(
+                CONF_GRANULARITY,
+                default=current_granularity,
+            ): SelectSelector(
+                SelectSelectorConfig(
+                    options=granularity_options,
+                    mode="dropdown",
+                )
+            ),
+            vol.Required(
+                CONF_METER_TYPE,
+                default=current_meter_type,
+            ): SelectSelector(
+                SelectSelectorConfig(
+                    options=[
+                        SelectOptionDict(value=METER_TYPE_ELECTRICITY, label="Electricity meter"),
+                        SelectOptionDict(value=METER_TYPE_GAS, label="Gas meter"),
+                    ],
+                    mode="dropdown",
+                )
+            ),
+            vol.Required(
+                CONF_GAS_UNIT,
+                default=current_gas_unit,
+            ): SelectSelector(
+                SelectSelectorConfig(
+                    options=[
+                        SelectOptionDict(value=GAS_UNIT_KWH, label="Energy (kWh)"),
+                        SelectOptionDict(value=GAS_UNIT_CUBIC_METERS, label="Volume (m3)"),
+                    ],
+                    mode="dropdown",
+                )
+            ),
+        }
+        schema = vol.Schema(schema_fields)
         return self.async_show_form(step_id="init", data_schema=schema)
 
 

@@ -14,8 +14,10 @@ from custom_components.fluvius.api import FluviusApiClient
 from custom_components.fluvius.const import (
     CONF_DAYS_BACK,
     CONF_GRANULARITY,
+    CONF_GAS_UNIT,
     GAS_MIN_LOOKBACK_DAYS,
     GAS_SUPPORTED_GRANULARITY,
+    GAS_UNIT_CUBIC_METERS,
     METER_TYPE_GAS,
 )
 
@@ -37,9 +39,9 @@ def _make_client(*, meter_type: str | None = None, options: dict | None = None) 
 
 
 def test_gas_day_uses_kwh_values_only():
-    """Ensure gas readings drop the m³ duplicate and store the kWh value."""
+    """Ensure gas readings drop the m3 duplicate and store the kWh value."""
 
-    client = _make_client()
+    client = _make_client(meter_type=METER_TYPE_GAS)
     summary = client._summarize_day(  # pylint: disable=protected-access
         {
             "d": "2025-11-18T05:00:00Z",
@@ -54,6 +56,31 @@ def test_gas_day_uses_kwh_values_only():
     assert summary is not None
     assert summary.metrics["consumption_high"] == pytest.approx(57.9398)
     assert summary.metrics["consumption_total"] == pytest.approx(57.9398)
+    assert summary.metrics["injection_total"] == 0.0
+
+
+
+def test_gas_day_can_use_cubic_meter_values():
+    """Allow gas readings to keep the m3 value instead of kWh."""
+
+    client = _make_client(
+        meter_type=METER_TYPE_GAS,
+        options={CONF_GAS_UNIT: GAS_UNIT_CUBIC_METERS},
+    )
+    summary = client._summarize_day(  # pylint: disable=protected-access
+        {
+            "d": "2025-11-18T05:00:00Z",
+            "de": "2025-11-19T05:00:00Z",
+            "v": [
+                {"dc": 0, "t": 1, "v": 5.083, "u": 5},
+                {"dc": 0, "t": 1, "v": 57.9398, "u": 3},
+            ],
+        }
+    )
+
+    assert summary is not None
+    assert summary.metrics["consumption_high"] == pytest.approx(5.083)
+    assert summary.metrics["consumption_total"] == pytest.approx(5.083)
     assert summary.metrics["injection_total"] == 0.0
 
 
