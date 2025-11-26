@@ -1,6 +1,10 @@
 {
   "config": {
     "step": {
+        "options": {
+        "title": "Fluvius Options",
+        "description": "Configure history window, granularity, and meter type."
+      },
       "user": {
         "title": "Connect to Fluvius",
         "description": "Enter the credentials that you also use on mijn.fluvius.be and select the meter you want to expose to Home Assistant.",
