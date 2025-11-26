@@ -7,7 +7,7 @@ import voluptuous as vol
 
 from homeassistant import config_entries
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.selector import (
@@ -84,6 +84,11 @@ class FluviusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if self._reauth_entry is None:
             return self.async_abort(reason="unknown")
         return await self._async_credentials_step("reauth_confirm", user_input, reauth_entry=self._reauth_entry)
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry: ConfigEntry) -> FluviusOptionsFlowHandler:
+        return FluviusOptionsFlowHandler(config_entry)
 
     async def _async_credentials_step(
         self,

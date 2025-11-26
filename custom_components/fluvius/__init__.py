@@ -25,7 +25,6 @@ from .const import (
     PLATFORMS,
 )
 from .coordinator import FluviusEnergyDataUpdateCoordinator
-from .config_flow import FluviusOptionsFlowHandler
 from .http import async_create_fluvius_session
 from .models import FluviusRuntimeData
 from .store import FluviusEnergyStore
@@ -101,5 +100,4 @@ async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     await hass.config_entries.async_reload(entry.entry_id)
 
 
-async def async_get_options_flow(config_entry: ConfigEntry) -> FluviusOptionsFlowHandler:
-    return FluviusOptionsFlowHandler(config_entry)
+
