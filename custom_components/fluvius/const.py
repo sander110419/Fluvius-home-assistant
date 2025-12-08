@@ -33,6 +33,10 @@ METER_TYPE_OPTIONS = (METER_TYPE_ELECTRICITY, METER_TYPE_GAS)
 GAS_MIN_LOOKBACK_DAYS = 7
 GAS_SUPPORTED_GRANULARITY = "4"
 
+# Hourly/quarter-hourly granularity for detailed consumption data
+HOURLY_GRANULARITY = "1"  # 15-minute intervals
+DEFAULT_HOURLY_DAYS_BACK = 1  # Fetch today's data by default
+
 PLATFORMS: list[Platform] = [Platform.SENSOR]
 
 STORAGE_VERSION = 1

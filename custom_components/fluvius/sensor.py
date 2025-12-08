@@ -17,7 +17,7 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .api import FluviusPeakMeasurement
+from .api import FluviusPeakMeasurement, FluviusQuarterHourlyMeasurement
 from .const import (
     CONF_EAN,
     CONF_GAS_UNIT,
@@ -125,6 +125,29 @@ PEAK_POWER_DESCRIPTION = SensorEntityDescription(
     suggested_display_precision=3,
 )
 
+# Quarter-hourly (15-minute interval) sensor descriptions
+# These sensors show the DAILY TOTAL from quarter-hourly data
+# The detailed 15-minute breakdown is available in the attributes
+QUARTER_HOURLY_CONSUMPTION_DESCRIPTION = SensorEntityDescription(
+    key="quarter_hourly_consumption",
+    translation_key="quarter_hourly_consumption",
+    name="Fluvius consumption (quarter-hourly)",
+    device_class=SensorDeviceClass.ENERGY,
+    native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+    state_class=SensorStateClass.TOTAL_INCREASING,
+    suggested_display_precision=3,
+)
+
+QUARTER_HOURLY_INJECTION_DESCRIPTION = SensorEntityDescription(
+    key="quarter_hourly_injection",
+    translation_key="quarter_hourly_injection",
+    name="Fluvius injection (quarter-hourly)",
+    device_class=SensorDeviceClass.ENERGY,
+    native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+    state_class=SensorStateClass.TOTAL_INCREASING,
+    suggested_display_precision=3,
+)
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -160,6 +183,31 @@ async def async_setup_entry(
         entities.append(
             FluviusPeakPowerSensor(PEAK_POWER_DESCRIPTION, coordinator, entry.entry_id, ean, meter_serial)
         )
+    
+    # Add quarter-hourly consumption and injection sensors
+    quarter_hourly_consumption_desc = QUARTER_HOURLY_CONSUMPTION_DESCRIPTION
+    quarter_hourly_injection_desc = QUARTER_HOURLY_INJECTION_DESCRIPTION
+    if use_gas_volume:
+        quarter_hourly_consumption_desc = replace(
+            quarter_hourly_consumption_desc,
+            device_class=SensorDeviceClass.GAS,
+            native_unit_of_measurement=UnitOfVolume.CUBIC_METERS,
+        )
+        quarter_hourly_injection_desc = replace(
+            quarter_hourly_injection_desc,
+            device_class=SensorDeviceClass.GAS,
+            native_unit_of_measurement=UnitOfVolume.CUBIC_METERS,
+        )
+    entities.append(
+        FluviusQuarterHourlyConsumptionSensor(
+            quarter_hourly_consumption_desc, coordinator, entry.entry_id, ean, meter_serial
+        )
+    )
+    entities.append(
+        FluviusQuarterHourlyInjectionSensor(
+            quarter_hourly_injection_desc, coordinator, entry.entry_id, ean, meter_serial
+        )
+    )
     async_add_entities(entities)
 
 
@@ -272,4 +320,154 @@ class FluviusPeakPowerSensor(CoordinatorEntity[FluviusEnergyDataUpdateCoordinato
             "spike_window_start": latest.spike_start.isoformat(),
             "spike_window_end": latest.spike_end.isoformat(),
             "monthly_peaks_kw": history,
+        }
+
+
+class FluviusQuarterHourlyConsumptionSensor(
+    CoordinatorEntity[FluviusEnergyDataUpdateCoordinator], SensorEntity
+):
+    """Expose the latest quarter-hourly (15-minute) consumption data."""
+
+    entity_description: SensorEntityDescription
+
+    def __init__(
+        self,
+        description: SensorEntityDescription,
+        coordinator: FluviusEnergyDataUpdateCoordinator,
+        entry_id: str,
+        ean: str,
+        meter_serial: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self.entity_description = description
+        self._attr_unique_id = f"{entry_id}_{description.key}"
+        self._attr_has_entity_name = True
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, ean)},
+            manufacturer="Fluvius",
+            model=meter_serial,
+            name=f"Fluvius meter {meter_serial}",
+        )
+
+    def _latest_measurement(self) -> FluviusQuarterHourlyMeasurement | None:
+        """Get the most recent quarter-hourly measurement."""
+        data: FluviusCoordinatorData | None = self.coordinator.data
+        if not data or not data.quarter_hourly_measurements:
+            return None
+        return data.quarter_hourly_measurements[-1]
+
+    @property
+    def native_value(self) -> Optional[float]:
+        """Return the cumulative consumption from all available quarter-hourly data."""
+        data: FluviusCoordinatorData | None = self.coordinator.data
+        if not data or not data.quarter_hourly_measurements:
+            return None
+        # Sum all consumption values - this creates a total that increases over time
+        total = sum(m.consumption for m in data.quarter_hourly_measurements)
+        return round(total, 3)
+
+    @property
+    def extra_state_attributes(self) -> Optional[Dict[str, Any]]:
+        data: FluviusCoordinatorData | None = self.coordinator.data
+        latest = self._latest_measurement()
+        if not data or not latest:
+            return None
+        
+        # Include the last 96 intervals (24 hours of 15-minute data)
+        recent_intervals = data.quarter_hourly_measurements[-96:]
+        hourly_data = {
+            m.start.isoformat(): round(m.consumption, 3)
+            for m in recent_intervals
+        }
+        
+        # Calculate totals for the last day of data
+        last_day_consumption = sum(m.consumption for m in recent_intervals)
+        
+        # Get the date range of available data
+        first_measurement = data.quarter_hourly_measurements[0] if data.quarter_hourly_measurements else None
+        
+        return {
+            "period_start": latest.start.isoformat(),
+            "period_end": latest.end.isoformat(),
+            "data_from": first_measurement.start.isoformat() if first_measurement else None,
+            "data_until": latest.end.isoformat(),
+            "last_day_total": round(last_day_consumption, 3),
+            "last_interval_value": round(latest.consumption, 3),
+            "interval_count": len(data.quarter_hourly_measurements),
+            "quarter_hourly_consumption": hourly_data,
+        }
+
+
+class FluviusQuarterHourlyInjectionSensor(
+    CoordinatorEntity[FluviusEnergyDataUpdateCoordinator], SensorEntity
+):
+    """Expose the latest quarter-hourly (15-minute) injection data."""
+
+    entity_description: SensorEntityDescription
+
+    def __init__(
+        self,
+        description: SensorEntityDescription,
+        coordinator: FluviusEnergyDataUpdateCoordinator,
+        entry_id: str,
+        ean: str,
+        meter_serial: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self.entity_description = description
+        self._attr_unique_id = f"{entry_id}_{description.key}"
+        self._attr_has_entity_name = True
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, ean)},
+            manufacturer="Fluvius",
+            model=meter_serial,
+            name=f"Fluvius meter {meter_serial}",
+        )
+
+    def _latest_measurement(self) -> FluviusQuarterHourlyMeasurement | None:
+        """Get the most recent quarter-hourly measurement."""
+        data: FluviusCoordinatorData | None = self.coordinator.data
+        if not data or not data.quarter_hourly_measurements:
+            return None
+        return data.quarter_hourly_measurements[-1]
+
+    @property
+    def native_value(self) -> Optional[float]:
+        """Return the cumulative injection from all available quarter-hourly data."""
+        data: FluviusCoordinatorData | None = self.coordinator.data
+        if not data or not data.quarter_hourly_measurements:
+            return None
+        # Sum all injection values - this creates a total that increases over time
+        total = sum(m.injection for m in data.quarter_hourly_measurements)
+        return round(total, 3)
+
+    @property
+    def extra_state_attributes(self) -> Optional[Dict[str, Any]]:
+        data: FluviusCoordinatorData | None = self.coordinator.data
+        latest = self._latest_measurement()
+        if not data or not latest:
+            return None
+        
+        # Include the last 96 intervals (24 hours of 15-minute data)
+        recent_intervals = data.quarter_hourly_measurements[-96:]
+        hourly_data = {
+            m.start.isoformat(): round(m.injection, 3)
+            for m in recent_intervals
+        }
+        
+        # Calculate totals for the last day of data
+        last_day_injection = sum(m.injection for m in recent_intervals)
+        
+        # Get the date range of available data
+        first_measurement = data.quarter_hourly_measurements[0] if data.quarter_hourly_measurements else None
+        
+        return {
+            "period_start": latest.start.isoformat(),
+            "period_end": latest.end.isoformat(),
+            "data_from": first_measurement.start.isoformat() if first_measurement else None,
+            "data_until": latest.end.isoformat(),
+            "last_day_total": round(last_day_injection, 3),
+            "last_interval_value": round(latest.injection, 3),
+            "interval_count": len(data.quarter_hourly_measurements),
+            "quarter_hourly_injection": hourly_data,
         }

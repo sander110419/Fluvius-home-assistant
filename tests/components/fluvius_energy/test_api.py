@@ -204,3 +204,105 @@ def test_gas_requests_force_daily_granularity(monkeypatch):
 
     assert captured["granularity"] == GAS_SUPPORTED_GRANULARITY
     assert summaries[0].metrics["consumption_high"] == pytest.approx(1.0)
+
+
+def test_quarter_hourly_payload_parsing():
+    """Ensure the quarter-hourly payload is correctly parsed into measurements."""
+
+    client = _make_client()
+    measurements = client._quarter_hourly_from_payload(  # pylint: disable=protected-access
+        [
+            {
+                "d": "2025-11-30T23:00:00Z",
+                "de": "2025-11-30T23:15:00Z",
+                "v": [
+                    {"dc": 2, "t": 1, "st": 0, "v": 0.062, "vs": 2, "u": 3, "gcuv": None},
+                    {"dc": 2, "t": 2, "st": 0, "v": 0.0, "vs": 2, "u": 3, "gcuv": None},
+                ],
+            },
+            {
+                "d": "2025-11-30T23:15:00Z",
+                "de": "2025-11-30T23:30:00Z",
+                "v": [
+                    {"dc": 2, "t": 1, "st": 0, "v": 0.076, "vs": 2, "u": 3, "gcuv": None},
+                    {"dc": 2, "t": 2, "st": 0, "v": 0.010, "vs": 2, "u": 3, "gcuv": None},
+                ],
+            },
+        ]
+    )
+
+    assert len(measurements) == 2
+    assert measurements[0].consumption == pytest.approx(0.062)
+    assert measurements[0].injection == pytest.approx(0.0)
+    assert measurements[0].start.isoformat() == "2025-11-30T23:00:00+00:00"
+    assert measurements[0].end.isoformat() == "2025-11-30T23:15:00+00:00"
+    assert measurements[1].consumption == pytest.approx(0.076)
+    assert measurements[1].injection == pytest.approx(0.010)
+
+
+def test_quarter_hourly_sorted_by_start_time():
+    """Verify quarter-hourly measurements are sorted chronologically."""
+
+    client = _make_client()
+    measurements = client._quarter_hourly_from_payload(  # pylint: disable=protected-access
+        [
+            {
+                "d": "2025-12-01T01:00:00Z",
+                "de": "2025-12-01T01:15:00Z",
+                "v": [{"dc": 2, "t": 1, "v": 0.05, "u": 3}],
+            },
+            {
+                "d": "2025-12-01T00:00:00Z",
+                "de": "2025-12-01T00:15:00Z",
+                "v": [{"dc": 2, "t": 1, "v": 0.09, "u": 3}],
+            },
+        ]
+    )
+
+    assert len(measurements) == 2
+    assert measurements[0].start < measurements[1].start
+
+
+def test_quarter_hourly_gas_uses_kwh_only():
+    """Ensure gas quarter-hourly readings drop m3 and keep kWh values."""
+
+    client = _make_client(meter_type=METER_TYPE_GAS)
+    measurements = client._quarter_hourly_from_payload(  # pylint: disable=protected-access
+        [
+            {
+                "d": "2025-11-30T23:00:00Z",
+                "de": "2025-11-30T23:15:00Z",
+                "v": [
+                    {"dc": 2, "t": 1, "v": 0.5, "u": 5},  # m3 - should be skipped
+                    {"dc": 2, "t": 1, "v": 5.7, "u": 3},  # kWh - should be kept
+                ],
+            },
+        ]
+    )
+
+    assert len(measurements) == 1
+    assert measurements[0].consumption == pytest.approx(5.7)
+
+
+def test_quarter_hourly_gas_can_use_cubic_meters():
+    """Allow gas quarter-hourly readings to use m3 values."""
+
+    client = _make_client(
+        meter_type=METER_TYPE_GAS,
+        options={CONF_GAS_UNIT: GAS_UNIT_CUBIC_METERS},
+    )
+    measurements = client._quarter_hourly_from_payload(  # pylint: disable=protected-access
+        [
+            {
+                "d": "2025-11-30T23:00:00Z",
+                "de": "2025-11-30T23:15:00Z",
+                "v": [
+                    {"dc": 2, "t": 1, "v": 0.5, "u": 5},  # m3 - should be kept
+                    {"dc": 2, "t": 1, "v": 5.7, "u": 3},  # kWh - should be skipped
+                ],
+            },
+        ]
+    )
+
+    assert len(measurements) == 1
+    assert measurements[0].consumption == pytest.approx(0.5)
