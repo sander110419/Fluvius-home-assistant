@@ -16,11 +16,13 @@ from .const import (
     DEFAULT_DAYS_BACK,
     DEFAULT_GRANULARITY,
     DEFAULT_GAS_UNIT,
+    DEFAULT_HOURLY_DAYS_BACK,
     DEFAULT_METER_TYPE,
     DEFAULT_TIMEZONE,
     GAS_MIN_LOOKBACK_DAYS,
     GAS_SUPPORTED_GRANULARITY,
     GAS_UNIT_CUBIC_METERS,
+    HOURLY_GRANULARITY,
     METER_TYPE_GAS,
 )
 from .auth import FluviusAuthError, async_get_bearer_token
@@ -59,6 +61,16 @@ class FluviusPeakMeasurement:
     spike_start: datetime
     spike_end: datetime
     value_kw: float
+
+
+@dataclass(slots=True)
+class FluviusQuarterHourlyMeasurement:
+    """Container for a single 15-minute interval of energy data."""
+
+    start: datetime
+    end: datetime
+    consumption: float  # kWh consumed in this interval
+    injection: float  # kWh injected in this interval
 
 
 class FluviusApiClient:
@@ -101,6 +113,23 @@ class FluviusApiClient:
         """Return both the daily summaries and the monthly peak power values."""
 
         return await self._fetch_summaries_and_spikes(include_spikes=True)
+
+    async def fetch_quarter_hourly_consumption(
+        self,
+        days_back: int = DEFAULT_HOURLY_DAYS_BACK,
+    ) -> List[FluviusQuarterHourlyMeasurement]:
+        """Retrieve 15-minute interval consumption data for the specified period.
+        
+        Args:
+            days_back: Number of days to look back (default: 1 for today only).
+                       Note: Fluvius counts time starting at 11PM the previous day.
+        
+        Returns:
+            List of quarter-hourly measurements sorted by start time.
+        """
+        access_token = await self._async_get_access_token()
+        payload = await self._fetch_raw_quarter_hourly(access_token, days_back)
+        return self._quarter_hourly_from_payload(payload)
 
     async def _fetch_summaries_and_spikes(
         self,
@@ -178,6 +207,57 @@ class FluviusApiClient:
             days_back = max(days_back, GAS_MIN_LOOKBACK_DAYS)
         local_now = datetime.now(tzinfo)
         start_date = (local_now - timedelta(days=days_back)).replace(hour=0, minute=0, second=0, microsecond=0)
+        end_date = local_now.replace(hour=23, minute=59, second=59, microsecond=999000)
+        return {
+            "historyFrom": start_date.isoformat(timespec="milliseconds"),
+            "historyUntil": end_date.isoformat(timespec="milliseconds"),
+        }
+
+    async def _fetch_raw_quarter_hourly(
+        self,
+        access_token: str,
+        days_back: int,
+    ) -> List[Dict[str, Any]]:
+        """Fetch raw quarter-hourly (15-minute) consumption data from the API."""
+        history_params = self._build_quarter_hourly_range(days_back)
+        params = {
+            **history_params,
+            "granularity": HOURLY_GRANULARITY,
+            "asServiceProvider": "false",
+            "meterSerialNumber": self._meter_serial,
+        }
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Accept": "application/json",
+            "User-Agent": "Mozilla/5.0 (HomeAssistant-FluviusEnergy)",
+        }
+        url = f"https://mijn.fluvius.be/verbruik/api/meter-measurement-history/{self._ean}"
+
+        try:
+            async with self._session.get(url, params=params, headers=headers, timeout=30) as response:
+                response.raise_for_status()
+                data: Any = await response.json()
+        except aiohttp.ClientError as err:
+            raise FluviusApiError(f"Quarter-hourly consumption API call failed: {err}") from err
+        except ValueError as err:  # pragma: no cover - defensive
+            raise FluviusApiError(f"Failed to decode Fluvius JSON: {err}") from err
+
+        if not isinstance(data, list):
+            raise FluviusApiError("Fluvius API returned an unexpected payload (expected list)")
+        return data
+
+    def _build_quarter_hourly_range(self, days_back: int) -> Dict[str, str]:
+        """Build the date range for quarter-hourly data requests.
+        
+        Note: Fluvius counts time starting at 11PM the previous day in local time,
+        so we adjust the start date accordingly.
+        """
+        tzinfo = self._resolve_timezone(self._options.get(CONF_TIMEZONE, DEFAULT_TIMEZONE))
+        local_now = datetime.now(tzinfo)
+        # Start from midnight of the target date
+        start_date = (local_now - timedelta(days=days_back)).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
         end_date = local_now.replace(hour=23, minute=59, second=59, microsecond=999000)
         return {
             "historyFrom": start_date.isoformat(timespec="milliseconds"),
@@ -280,6 +360,58 @@ class FluviusApiClient:
                 )
         peaks.sort(key=lambda item: item.period_start)
         return peaks
+
+    def _quarter_hourly_from_payload(
+        self,
+        payload: List[Dict[str, Any]],
+    ) -> List[FluviusQuarterHourlyMeasurement]:
+        """Parse the raw API response into quarter-hourly measurements.
+        
+        Each item in the payload represents a 15-minute interval with:
+        - d: start datetime (ISO format)
+        - de: end datetime (ISO format)
+        - v: array of values with t=1 for consumption, t=2 for injection
+        """
+        measurements: List[FluviusQuarterHourlyMeasurement] = []
+        target_unit = self._target_unit_code()
+
+        for interval in payload:
+            start = self._parse_datetime(interval.get("d"))
+            end = self._parse_datetime(interval.get("de"))
+            if not start or not end:
+                continue
+
+            consumption = 0.0
+            injection = 0.0
+
+            for reading in interval.get("v", []) or []:
+                value_type = self._safe_int(reading.get("t"))  # 1=consumption, 2=injection
+                unit = self._safe_int(reading.get("u"))
+                value = self._safe_float(reading.get("v"))
+
+                # Skip readings that don't match the target unit (for gas meters)
+                if target_unit is not None and unit != target_unit:
+                    continue
+                # Skip volume readings for electricity meters
+                if target_unit is None and unit == CUBIC_METER_UNIT_CODE:
+                    continue
+
+                if value_type == 1:
+                    consumption += value
+                elif value_type == 2:
+                    injection += value
+
+            measurements.append(
+                FluviusQuarterHourlyMeasurement(
+                    start=start,
+                    end=end,
+                    consumption=consumption,
+                    injection=injection,
+                )
+            )
+
+        measurements.sort(key=lambda item: item.start)
+        return measurements
 
     def _summarize_day(self, day_data: Dict[str, Any]) -> Optional[FluviusDailySummary]:
         start = self._parse_datetime(day_data.get("d"))
