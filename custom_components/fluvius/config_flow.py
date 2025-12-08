@@ -11,6 +11,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.selector import (
+    BooleanSelector,
     NumberSelector,
     NumberSelectorConfig,
     SelectOptionDict,
@@ -32,11 +33,13 @@ from .const import (
     CONF_METER_TYPE,
     CONF_PASSWORD,
     CONF_TIMEZONE,
+    CONF_VERBOSE_LOGGING,
     DEFAULT_DAYS_BACK,
     DEFAULT_GAS_UNIT,
     DEFAULT_GRANULARITY,
     DEFAULT_METER_TYPE,
     DEFAULT_TIMEZONE,
+    DEFAULT_VERBOSE_LOGGING,
     DOMAIN,
     METER_TYPE_ELECTRICITY,
     METER_TYPE_GAS,
@@ -238,6 +241,10 @@ class FluviusOptionsFlowHandler(config_entries.OptionsFlow):
                     mode="dropdown",
                 )
             ),
+            vol.Optional(
+                CONF_VERBOSE_LOGGING,
+                default=self._entry.options.get(CONF_VERBOSE_LOGGING, DEFAULT_VERBOSE_LOGGING),
+            ): BooleanSelector(),
         }
         schema = vol.Schema(schema_fields)
         return self.async_show_form(step_id="init", data_schema=schema)
