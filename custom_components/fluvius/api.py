@@ -14,12 +14,14 @@ from .const import (
     CONF_GRANULARITY,
     CONF_GAS_UNIT,
     CONF_TIMEZONE,
+    CONF_VERBOSE_LOGGING,
     DEFAULT_DAYS_BACK,
     DEFAULT_GRANULARITY,
     DEFAULT_GAS_UNIT,
     DEFAULT_HOURLY_DAYS_BACK,
     DEFAULT_METER_TYPE,
     DEFAULT_TIMEZONE,
+    DEFAULT_VERBOSE_LOGGING,
     GAS_MIN_LOOKBACK_DAYS,
     GAS_SUPPORTED_GRANULARITY,
     GAS_UNIT_CUBIC_METERS,
@@ -99,6 +101,12 @@ class FluviusApiClient:
         self._meter_type = meter_type
         self._remember_me = remember_me
         self._options = options or {}
+        self._verbose = bool(self._options.get(CONF_VERBOSE_LOGGING, DEFAULT_VERBOSE_LOGGING))
+
+    def _log_verbose(self, message: str, *args: Any) -> None:
+        """Log a message only if verbose logging is enabled."""
+        if self._verbose:
+            LOGGER.debug("[VERBOSE] " + message, *args)
 
     # ------------------------------------------------------------------
     # Public API
@@ -159,21 +167,47 @@ class FluviusApiClient:
     # HTTP helpers
     # ------------------------------------------------------------------
     async def _async_get_access_token(self) -> str:
+        self._log_verbose("Starting authentication for user: %s", self._email[:3] + "***")
         try:
             access_token, _ = await async_get_bearer_token(
                 self._session,
                 self._email,
                 self._password,
                 remember_me=self._remember_me,
-                verbose=False,
+                verbose=self._verbose,
             )
         except FluviusAuthError as err:
-            raise FluviusApiError(f"Authentication failed: {err}") from err
+            error_msg = str(err)
+            LOGGER.error(
+                "FLUVIUS AUTH ERROR: Failed to authenticate with Fluvius. "
+                "This usually means: 1) Invalid email/password, 2) Fluvius service is down, "
+                "or 3) Your account needs re-verification at mijn.fluvius.be. "
+                "Details: %s",
+                error_msg,
+            )
+            raise FluviusApiError(
+                f"Authentication failed - check your credentials or visit mijn.fluvius.be to verify your account. Error: {err}"
+            ) from err
         except aiohttp.ClientError as err:
-            raise FluviusApiError(f"Network error while authenticating: {err}") from err
+            LOGGER.error(
+                "FLUVIUS NETWORK ERROR: Could not reach Fluvius authentication servers. "
+                "Check your internet connection. Details: %s",
+                err,
+            )
+            raise FluviusApiError(
+                f"Network error while authenticating - check internet connection. Error: {err}"
+            ) from err
 
         if not access_token:
-            raise FluviusApiError("Authentication response did not include an access token")
+            LOGGER.error(
+                "FLUVIUS AUTH ERROR: Authentication completed but no access token was returned. "
+                "This is unexpected - try re-authenticating or check Fluvius service status."
+            )
+            raise FluviusApiError(
+                "Authentication succeeded but no access token was returned - try removing and re-adding the integration"
+            )
+        
+        self._log_verbose("Authentication successful, received access token")
         return access_token
 
     async def _fetch_raw_consumption(self, access_token: str) -> List[Dict[str, Any]]:
@@ -187,6 +221,16 @@ class FluviusApiClient:
             "asServiceProvider": "false",
             "meterSerialNumber": self._meter_serial,
         }
+        
+        self._log_verbose(
+            "API Request - URL: meter-measurement-history/%s, Params: granularity=%s, from=%s, until=%s, meter=%s",
+            self._ean,
+            granularity,
+            history_params.get("historyFrom", ""),
+            history_params.get("historyUntil", ""),
+            self._meter_serial,
+        )
+        
         LOGGER.debug(
             "Fetching consumption: granularity=%s, from=%s, until=%s",
             granularity,
@@ -202,15 +246,63 @@ class FluviusApiClient:
 
         try:
             async with self._session.get(url, params=params, headers=headers, timeout=30) as response:
+                self._log_verbose(
+                    "API Response - Status: %s, Content-Type: %s",
+                    response.status,
+                    getattr(response, 'content_type', 'unknown'),
+                )
+                if response.status != 200:
+                    response_text = await response.text()
+                    self._log_verbose("API Error Response Body: %s", response_text[:500])
+                    LOGGER.error(
+                        "FLUVIUS API ERROR: Consumption API returned HTTP %s. "
+                        "EAN: %s, Meter: %s. Response: %s",
+                        response.status,
+                        self._ean,
+                        self._meter_serial,
+                        response_text[:200],
+                    )
                 response.raise_for_status()
                 data: Any = await response.json()
+        except aiohttp.ClientResponseError as err:
+            LOGGER.error(
+                "FLUVIUS API ERROR: Failed to fetch consumption data. HTTP Status: %s, Reason: %s. "
+                "This could mean: 1) EAN '%s' is invalid, 2) Meter serial '%s' doesn't match, "
+                "or 3) Fluvius API is experiencing issues.",
+                err.status,
+                err.message,
+                self._ean,
+                self._meter_serial,
+            )
+            raise FluviusApiError(
+                f"Consumption API call failed (HTTP {err.status}): {err.message}. Check EAN and meter serial."
+            ) from err
         except aiohttp.ClientError as err:
-            raise FluviusApiError(f"Consumption API call failed: {err}") from err
+            LOGGER.error(
+                "FLUVIUS NETWORK ERROR: Could not fetch consumption data. "
+                "Check internet connection. Error: %s",
+                err,
+            )
+            raise FluviusApiError(f"Consumption API call failed - network error: {err}") from err
         except ValueError as err:  # pragma: no cover - defensive
-            raise FluviusApiError(f"Failed to decode Fluvius JSON: {err}") from err
+            LOGGER.error("FLUVIUS API ERROR: Received invalid JSON from Fluvius: %s", err)
+            raise FluviusApiError(f"Failed to decode Fluvius JSON response: {err}") from err
 
         if not isinstance(data, list):
-            raise FluviusApiError("Fluvius API returned an unexpected payload (expected list)")
+            LOGGER.error(
+                "FLUVIUS API ERROR: Unexpected response format. Expected list, got %s. "
+                "Response preview: %s",
+                type(data).__name__,
+                str(data)[:200],
+            )
+            raise FluviusApiError(
+                f"Fluvius API returned unexpected response type: {type(data).__name__} (expected list)"
+            )
+        
+        self._log_verbose("API Response - Received %d items in payload", len(data))
+        if data and self._verbose:
+            self._log_verbose("First item keys: %s", list(data[0].keys()) if data[0] else "empty")
+        
         return data
 
     def _build_history_range(self) -> Dict[str, str]:
@@ -256,6 +348,14 @@ class FluviusApiClient:
             "asServiceProvider": "false",
             "meterSerialNumber": self._meter_serial,
         }
+        
+        self._log_verbose(
+            "Quarter-hourly API Request - from=%s, until=%s, days_back=%d",
+            history_params.get("historyFrom", ""),
+            history_params.get("historyUntil", ""),
+            days_back,
+        )
+        
         headers = {
             "Authorization": f"Bearer {access_token}",
             "Accept": "application/json",
@@ -265,15 +365,37 @@ class FluviusApiClient:
 
         try:
             async with self._session.get(url, params=params, headers=headers, timeout=30) as response:
+                self._log_verbose("Quarter-hourly API Response - Status: %s", response.status)
+                if response.status != 200:
+                    response_text = await response.text()
+                    LOGGER.warning(
+                        "FLUVIUS API WARNING: Quarter-hourly API returned HTTP %s. "
+                        "This data may not be available for your meter. Response: %s",
+                        response.status,
+                        response_text[:200],
+                    )
                 response.raise_for_status()
                 data: Any = await response.json()
+        except aiohttp.ClientResponseError as err:
+            LOGGER.warning(
+                "FLUVIUS API WARNING: Could not fetch quarter-hourly data (HTTP %s). "
+                "15-minute interval data may not be available for meter %s.",
+                err.status,
+                self._meter_serial,
+            )
+            raise FluviusApiError(
+                f"Quarter-hourly consumption API failed (HTTP {err.status}) - this data may not be available for your meter"
+            ) from err
         except aiohttp.ClientError as err:
+            LOGGER.warning("FLUVIUS NETWORK WARNING: Could not fetch quarter-hourly data: %s", err)
             raise FluviusApiError(f"Quarter-hourly consumption API call failed: {err}") from err
         except ValueError as err:  # pragma: no cover - defensive
             raise FluviusApiError(f"Failed to decode Fluvius JSON: {err}") from err
 
         if not isinstance(data, list):
             raise FluviusApiError("Fluvius API returned an unexpected payload (expected list)")
+        
+        self._log_verbose("Quarter-hourly API Response - Received %d intervals", len(data))
         return data
 
     def _build_quarter_hourly_range(self, days_back: int) -> Dict[str, str]:
@@ -298,11 +420,19 @@ class FluviusApiClient:
         }
 
     async def _fetch_raw_spikes(self, access_token: str) -> List[Dict[str, Any]]:
+        spike_params = self._build_spike_history_range()
         params = {
-            **self._build_spike_history_range(),
+            **spike_params,
             "asServiceProvider": "false",
             "meterSerialNumber": self._meter_serial,
         }
+        
+        self._log_verbose(
+            "Peak power API Request - from=%s, until=%s",
+            spike_params.get("historyFrom", "")[:10],
+            spike_params.get("historyUntil", "")[:10],
+        )
+        
         headers = {
             "Authorization": f"Bearer {access_token}",
             "Accept": "application/json",
@@ -312,15 +442,34 @@ class FluviusApiClient:
 
         try:
             async with self._session.get(url, params=params, headers=headers, timeout=30) as response:
+                self._log_verbose("Peak power API Response - Status: %s", response.status)
+                if response.status != 200:
+                    response_text = await response.text()
+                    LOGGER.warning(
+                        "FLUVIUS API WARNING: Peak power API returned HTTP %s. Response: %s",
+                        response.status,
+                        response_text[:200],
+                    )
                 response.raise_for_status()
                 data: Any = await response.json()
+        except aiohttp.ClientResponseError as err:
+            LOGGER.warning(
+                "FLUVIUS API WARNING: Could not fetch peak power data (HTTP %s). "
+                "Peak power data may not be available for meter %s.",
+                err.status,
+                self._meter_serial,
+            )
+            raise FluviusApiError(f"Peak power API call failed (HTTP {err.status})") from err
         except aiohttp.ClientError as err:
+            LOGGER.warning("FLUVIUS NETWORK WARNING: Could not fetch peak power data: %s", err)
             raise FluviusApiError(f"Peak power API call failed: {err}") from err
         except ValueError as err:  # pragma: no cover - defensive
             raise FluviusApiError(f"Failed to decode Fluvius JSON: {err}") from err
 
         if not isinstance(data, list):
             raise FluviusApiError("Fluvius spike API returned an unexpected payload (expected list)")
+        
+        self._log_verbose("Peak power API Response - Received %d items", len(data))
         return data
 
     def _build_spike_history_range(self) -> Dict[str, str]:
