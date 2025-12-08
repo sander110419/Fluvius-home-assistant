@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+import logging
 from typing import Any, Dict, List, Optional
 
 import aiohttp
@@ -33,6 +34,8 @@ except ImportError:  # pragma: no cover - Windows without tzdata
     ZoneInfo = None  # type: ignore
     ZoneInfoNotFoundError = Exception  # type: ignore
 
+
+LOGGER = logging.getLogger(__name__)
 
 CUBIC_METER_UNIT_CODE = 5
 KILO_WATT_HOUR_UNIT_CODE = 3
@@ -138,9 +141,13 @@ class FluviusApiClient:
     ) -> tuple[List[FluviusDailySummary], List[FluviusPeakMeasurement]]:
         access_token = await self._async_get_access_token()
         payload = await self._fetch_raw_consumption(access_token)
+        LOGGER.debug("Raw consumption payload has %d items", len(payload))
+        if payload:
+            LOGGER.debug("First payload item keys: %s", list(payload[0].keys()) if payload[0] else "empty")
         summaries = self._summaries_from_payload(payload)
-        if not summaries:
-            raise FluviusApiError("No consumption rows returned by the Fluvius API")
+        LOGGER.debug("Parsed %d summaries from payload", len(summaries))
+        # Don't fail if no summaries - data may not be available yet for new setups
+        # The coordinator will handle empty data gracefully
 
         peaks: List[FluviusPeakMeasurement] = []
         if include_spikes and self._meter_type != METER_TYPE_GAS:
@@ -180,6 +187,12 @@ class FluviusApiClient:
             "asServiceProvider": "false",
             "meterSerialNumber": self._meter_serial,
         }
+        LOGGER.debug(
+            "Fetching consumption: granularity=%s, from=%s, until=%s",
+            granularity,
+            history_params.get("historyFrom", "")[:10],
+            history_params.get("historyUntil", "")[:10],
+        )
         headers = {
             "Authorization": f"Bearer {access_token}",
             "Accept": "application/json",
@@ -203,11 +216,28 @@ class FluviusApiClient:
     def _build_history_range(self) -> Dict[str, str]:
         tzinfo = self._resolve_timezone(self._options.get(CONF_TIMEZONE, DEFAULT_TIMEZONE))
         days_back = max(int(self._options.get(CONF_DAYS_BACK, DEFAULT_DAYS_BACK)), 1)
+        granularity = str(self._options.get(CONF_GRANULARITY, DEFAULT_GRANULARITY))
+        
         if self._meter_type == METER_TYPE_GAS:
             days_back = max(days_back, GAS_MIN_LOOKBACK_DAYS)
+        
         local_now = datetime.now(tzinfo)
-        start_date = (local_now - timedelta(days=days_back)).replace(hour=0, minute=0, second=0, microsecond=0)
-        end_date = local_now.replace(hour=23, minute=59, second=59, microsecond=999000)
+        
+        # For granularity=1 (15-min intervals), API only works for single day requests
+        if granularity == HOURLY_GRANULARITY:
+            # Request a single day (days_back days ago, but at least 1 day back for available data)
+            target_date = (local_now - timedelta(days=max(days_back, 1))).replace(
+                hour=0, minute=0, second=0, microsecond=0
+            )
+            start_date = target_date
+            end_date = target_date.replace(hour=23, minute=59, second=59, microsecond=999000)
+        else:
+            # Granularity=3 (quarter-hour) and granularity=4 (daily) - multi-day requests ending today
+            start_date = (local_now - timedelta(days=days_back)).replace(
+                hour=0, minute=0, second=0, microsecond=0
+            )
+            end_date = local_now.replace(hour=23, minute=59, second=59, microsecond=999000)
+        
         return {
             "historyFrom": start_date.isoformat(timespec="milliseconds"),
             "historyUntil": end_date.isoformat(timespec="milliseconds"),
@@ -249,16 +279,19 @@ class FluviusApiClient:
     def _build_quarter_hourly_range(self, days_back: int) -> Dict[str, str]:
         """Build the date range for quarter-hourly data requests.
         
-        Note: Fluvius counts time starting at 11PM the previous day in local time,
-        so we adjust the start date accordingly.
+        Note: Quarter-hourly data (granularity=1) requires SINGLE DAY requests.
+        Data is only available for PREVIOUS days, not the current day.
+        We request data for a single day: (days_back) days ago.
         """
         tzinfo = self._resolve_timezone(self._options.get(CONF_TIMEZONE, DEFAULT_TIMEZONE))
         local_now = datetime.now(tzinfo)
-        # Start from midnight of the target date
-        start_date = (local_now - timedelta(days=days_back)).replace(
+        # Request a single day: days_back days ago (must be at least yesterday)
+        target_date = (local_now - timedelta(days=max(days_back, 1))).replace(
             hour=0, minute=0, second=0, microsecond=0
         )
-        end_date = local_now.replace(hour=23, minute=59, second=59, microsecond=999000)
+        # For single day requests, start and end are on the same day
+        start_date = target_date
+        end_date = target_date.replace(hour=23, minute=59, second=59, microsecond=999000)
         return {
             "historyFrom": start_date.isoformat(timespec="milliseconds"),
             "historyUntil": end_date.isoformat(timespec="milliseconds"),
@@ -329,10 +362,12 @@ class FluviusApiClient:
 
     def _summaries_from_payload(self, payload: List[Dict[str, Any]]) -> List[FluviusDailySummary]:
         summaries: List[FluviusDailySummary] = []
-        for day_data in payload:
+        for i, day_data in enumerate(payload):
             summary = self._summarize_day(day_data)
             if summary:
                 summaries.append(summary)
+            else:
+                LOGGER.debug("Could not parse day_data at index %d: d=%s", i, day_data.get("d"))
         summaries.sort(key=lambda item: item.start)
         return summaries
 

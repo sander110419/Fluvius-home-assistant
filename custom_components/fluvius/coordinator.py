@@ -52,9 +52,19 @@ class FluviusEnergyDataUpdateCoordinator(DataUpdateCoordinator[FluviusCoordinato
     async def _async_update_data(self) -> FluviusCoordinatorData:
         try:
             summaries, peak_measurements = await self._client.fetch_daily_summaries_with_spikes()
-            quarter_hourly = await self._client.fetch_quarter_hourly_consumption()
         except FluviusApiError as err:
             raise UpdateFailed(str(err)) from err
+
+        if not summaries:
+            LOGGER.warning("No daily consumption data returned by the Fluvius API")
+
+        # Quarter-hourly data fetch is separate - don't fail the whole update if it's empty
+        quarter_hourly: list[FluviusQuarterHourlyMeasurement] = []
+        try:
+            quarter_hourly = await self._client.fetch_quarter_hourly_consumption()
+        except FluviusApiError as err:
+            # Log the error but don't fail - quarter-hourly data may not be available yet
+            LOGGER.warning("Could not fetch quarter-hourly data: %s", err)
 
         for summary in summaries:
             await self._store.async_process_summary(summary.day_id, summary.metrics)

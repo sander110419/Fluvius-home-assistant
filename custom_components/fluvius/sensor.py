@@ -126,13 +126,15 @@ PEAK_POWER_DESCRIPTION = SensorEntityDescription(
 )
 
 # Quarter-hourly (15-minute interval) sensor descriptions
+# These sensors show the DAILY TOTAL from quarter-hourly data
+# The detailed 15-minute breakdown is available in the attributes
 QUARTER_HOURLY_CONSUMPTION_DESCRIPTION = SensorEntityDescription(
     key="quarter_hourly_consumption",
     translation_key="quarter_hourly_consumption",
     name="Fluvius consumption (quarter-hourly)",
     device_class=SensorDeviceClass.ENERGY,
     native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-    state_class=SensorStateClass.MEASUREMENT,
+    state_class=SensorStateClass.TOTAL_INCREASING,
     suggested_display_precision=3,
 )
 
@@ -142,7 +144,7 @@ QUARTER_HOURLY_INJECTION_DESCRIPTION = SensorEntityDescription(
     name="Fluvius injection (quarter-hourly)",
     device_class=SensorDeviceClass.ENERGY,
     native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-    state_class=SensorStateClass.MEASUREMENT,
+    state_class=SensorStateClass.TOTAL_INCREASING,
     suggested_display_precision=3,
 )
 
@@ -356,10 +358,13 @@ class FluviusQuarterHourlyConsumptionSensor(
 
     @property
     def native_value(self) -> Optional[float]:
-        latest = self._latest_measurement()
-        if not latest:
+        """Return the cumulative consumption from all available quarter-hourly data."""
+        data: FluviusCoordinatorData | None = self.coordinator.data
+        if not data or not data.quarter_hourly_measurements:
             return None
-        return round(latest.consumption, 3)
+        # Sum all consumption values - this creates a total that increases over time
+        total = sum(m.consumption for m in data.quarter_hourly_measurements)
+        return round(total, 3)
 
     @property
     def extra_state_attributes(self) -> Optional[Dict[str, Any]]:
@@ -375,13 +380,20 @@ class FluviusQuarterHourlyConsumptionSensor(
             for m in recent_intervals
         }
         
-        # Calculate totals for today
-        today_consumption = sum(m.consumption for m in recent_intervals)
+        # Calculate totals for the last day of data
+        last_day_consumption = sum(m.consumption for m in recent_intervals)
+        
+        # Get the date range of available data
+        first_measurement = data.quarter_hourly_measurements[0] if data.quarter_hourly_measurements else None
         
         return {
             "period_start": latest.start.isoformat(),
             "period_end": latest.end.isoformat(),
-            "today_total_consumption": round(today_consumption, 3),
+            "data_from": first_measurement.start.isoformat() if first_measurement else None,
+            "data_until": latest.end.isoformat(),
+            "last_day_total": round(last_day_consumption, 3),
+            "last_interval_value": round(latest.consumption, 3),
+            "interval_count": len(data.quarter_hourly_measurements),
             "quarter_hourly_consumption": hourly_data,
         }
 
@@ -421,10 +433,13 @@ class FluviusQuarterHourlyInjectionSensor(
 
     @property
     def native_value(self) -> Optional[float]:
-        latest = self._latest_measurement()
-        if not latest:
+        """Return the cumulative injection from all available quarter-hourly data."""
+        data: FluviusCoordinatorData | None = self.coordinator.data
+        if not data or not data.quarter_hourly_measurements:
             return None
-        return round(latest.injection, 3)
+        # Sum all injection values - this creates a total that increases over time
+        total = sum(m.injection for m in data.quarter_hourly_measurements)
+        return round(total, 3)
 
     @property
     def extra_state_attributes(self) -> Optional[Dict[str, Any]]:
@@ -440,12 +455,19 @@ class FluviusQuarterHourlyInjectionSensor(
             for m in recent_intervals
         }
         
-        # Calculate totals for today
-        today_injection = sum(m.injection for m in recent_intervals)
+        # Calculate totals for the last day of data
+        last_day_injection = sum(m.injection for m in recent_intervals)
+        
+        # Get the date range of available data
+        first_measurement = data.quarter_hourly_measurements[0] if data.quarter_hourly_measurements else None
         
         return {
             "period_start": latest.start.isoformat(),
             "period_end": latest.end.isoformat(),
-            "today_total_injection": round(today_injection, 3),
+            "data_from": first_measurement.start.isoformat() if first_measurement else None,
+            "data_until": latest.end.isoformat(),
+            "last_day_total": round(last_day_injection, 3),
+            "last_interval_value": round(latest.injection, 3),
+            "interval_count": len(data.quarter_hourly_measurements),
             "quarter_hourly_injection": hourly_data,
         }
