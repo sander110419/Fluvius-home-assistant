@@ -13,6 +13,7 @@ from .const import (
     CONF_METER_TYPE,
     DEFAULT_METER_TYPE,
 )
+from .coordinator import FluviusCoordinatorData
 from .models import FluviusRuntimeData
 
 
@@ -24,6 +25,7 @@ async def async_get_config_entry_diagnostics(
 
     runtime_data: FluviusRuntimeData = entry.runtime_data
     coordinator = runtime_data.coordinator
+    client = runtime_data.client
     store = runtime_data.store
     latest = coordinator.data.latest_summary if coordinator.data else None
 
@@ -50,8 +52,42 @@ async def async_get_config_entry_diagnostics(
             }
             for peak in (coordinator.data.peak_measurements if coordinator.data else [])
         ],
+        # Fluvius does not document its granularity codes, so record what the probe
+        # asked and what came back: an empty interval import is otherwise opaque.
+        "interval_granularity": {
+            "expected_interval_minutes": client.interval_minutes,
+            "resolved_granularity": client.resolved_granularity,
+            "probe_outcomes": client.probe_outcomes,
+            "unavailable": client.interval_unavailable,
+        },
+        "interval_data": _interval_diagnostics(coordinator.data),
         "store_state": {
             "last_day": store.get_last_day_id(),
         },
     }
     return diagnostics
+
+
+def _interval_diagnostics(data: FluviusCoordinatorData | None) -> dict[str, Any]:
+    """Summarise the interval measurements without dumping hundreds of rows."""
+
+    measurements = data.quarter_hourly_measurements if data else []
+    if not measurements:
+        return {"interval_count": 0, "intervals": []}
+    return {
+        "interval_count": len(measurements),
+        "first_start": measurements[0].start.isoformat(),
+        "last_end": measurements[-1].end.isoformat(),
+        "consumption_sum": round(sum(item.consumption for item in measurements), 4),
+        "injection_sum": round(sum(item.injection for item in measurements), 4),
+        # Keep the payload readable: only the first and last few intervals.
+        "intervals": [
+            {
+                "start": item.start.isoformat(),
+                "end": item.end.isoformat(),
+                "consumption": item.consumption,
+                "injection": item.injection,
+            }
+            for item in (measurements[:5] + measurements[-5:])
+        ],
+    }

@@ -129,3 +129,63 @@ async def test_gas_volume_sensor_classes(hass):
     interval = next(e for e in entities if e.entity_description.key == "quarter_hourly_consumption")
     assert interval.entity_description.translation_key == "hourly_consumption"
     assert interval.state_class is None
+    # A gas meter only ever consumes, so an injection sensor would sit at zero forever.
+    assert not [e for e in entities if "injection" in e.entity_description.key]
+
+
+async def test_diagnostics_report_the_granularity_probe(hass):
+    """The probe outcome is recorded, so an empty interval import is not opaque."""
+
+    from custom_components.fluvius.api import FluviusApiClient, FluviusQuarterHourlyMeasurement
+    from custom_components.fluvius.coordinator import (
+        FluviusCoordinatorData,
+        FluviusEnergyDataUpdateCoordinator,
+    )
+    from custom_components.fluvius.diagnostics import async_get_config_entry_diagnostics
+    from custom_components.fluvius.models import FluviusRuntimeData
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            CONF_EAN: "541448800000000000",
+            CONF_METER_SERIAL: "TEST",
+            CONF_METER_TYPE: METER_TYPE_ELECTRICITY,
+        },
+    )
+    entry.add_to_hass(hass)
+
+    client = FluviusApiClient(
+        session=MagicMock(),
+        email="user@example.com",
+        password="secret",
+        ean="541448800000000000",
+        meter_serial="TEST",
+    )
+    client._interval_granularity = "1"
+    client._probe_outcomes = {"3": "no data", "1": "15-minute intervals"}
+
+    start = datetime(2026, 4, 1, 10, tzinfo=UTC)
+    coordinator = FluviusEnergyDataUpdateCoordinator(hass, client, MagicMock())
+    coordinator.data = FluviusCoordinatorData(
+        None,
+        {},
+        [],
+        [FluviusQuarterHourlyMeasurement(start, start + timedelta(minutes=15), 0.5, 0.125, {})],
+    )
+    entry.runtime_data = FluviusRuntimeData(
+        client=client,
+        coordinator=coordinator,
+        store=MagicMock(get_last_day_id=lambda: None),
+    )
+
+    result = await async_get_config_entry_diagnostics(hass, entry)
+
+    assert result["interval_granularity"] == {
+        "expected_interval_minutes": 15,
+        "resolved_granularity": "1",
+        "probe_outcomes": {"3": "no data", "1": "15-minute intervals"},
+        "unavailable": False,
+    }
+    assert result["interval_data"]["interval_count"] == 1
+    assert result["interval_data"]["consumption_sum"] == pytest.approx(0.5)
+    assert result["interval_data"]["injection_sum"] == pytest.approx(0.125)

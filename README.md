@@ -29,7 +29,7 @@ The original interval readings are retained in the integration's history storage
 
 ## Upgrading from 1.0.x
 
-Replace the integration files and **restart Home Assistant**. In the options, select the desired granularity again: older versions used API code `3` for quarters; electricity now uses `1`, gas hours use `2`, and daily uses `4`.
+Replace the integration files and **restart Home Assistant**. In the options, select the desired granularity again: `4` keeps daily readings, anything else enables detailed ones. The detailed API code no longer has to be right, because the integration probes for it (see **Granularity** below).
 
 Remove the old Fluvius sensor sources from the Energy dashboard and select the new **(historical)** sources. Existing entity history, including old spikes, is not rewritten or deleted. The new sources are rebuilt from available Fluvius data in the configured window. Increase **Days back** (up to 31) if needed. Older cached readings outside that window are not automatically migrated.
 
@@ -47,7 +47,7 @@ Clear the cutoff to resume current history. This restores the unrestricted sourc
 
 - **Timezone:** used for request boundaries; default `Europe/Brussels`.
 - **Days back:** complete history window per refresh, default seven; gas always uses at least seven days.
-- **Granularity:** Daily, electricity Quarter-hour, or gas Hourly. Empty detailed responses can mean that permission is missing or publication is delayed; daily readings continue to work.
+- **Granularity:** Daily, electricity Quarter-hour, or gas Hourly. Fluvius does not document its detailed API codes, so this choice is a preference rather than a fixed setting: the integration tries the selected code first, then the known candidates, and keeps whichever actually returns intervals of the meter's own resolution. If none does but a coarser one answers, that resolution is imported instead and a warning names it. Empty detailed responses can still mean that permission is missing or publication is delayed; daily readings continue to work, and the resolved code and per-code probe results appear in the diagnostics download.
 - **Gas unit:** selects the actual kWh or m3 readings provided by Fluvius. No fixed conversion factor is applied. After changing it, select the matching historical source in Energy.
 - **Verbose logging:** enables request dates and endpoint information. Credentials and raw response bodies are not logged.
 
