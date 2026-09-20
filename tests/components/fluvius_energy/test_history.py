@@ -419,6 +419,72 @@ async def test_gas_statistics_never_carry_an_injection_series(hass):
     assert not [sid for sid in written if "injection" in sid]
 
 
+async def test_gas_day_readings_are_not_collapsed_into_the_06h_bucket(hass):
+    """The reported symptom: a whole gas day showing as one spike at 06:00 local.
+
+    Gas summaries span the gas day (05:00Z -> 05:00Z in winter). _hours() only lets
+    interval readings replace a daily total when they tile that period exactly, so a
+    calendar-day window leaves the day lumped in its first bucket.
+    """
+
+    gas_day = datetime(2025, 11, 18, 5, tzinfo=UTC)
+    summary = FluviusDailySummary(
+        gas_day.isoformat(), gas_day, gas_day + timedelta(days=1), {"consumption_high": 24.0}
+    )
+
+    def hourly(first):
+        return [
+            FluviusQuarterHourlyMeasurement(
+                first + timedelta(hours=i),
+                first + timedelta(hours=i + 1),
+                1.0,
+                0,
+                {"consumption_high": 1.0},
+            )
+            for i in range(24)
+        ]
+
+    with patch("custom_components.fluvius.statistics.async_add_external_statistics"):
+        # Calendar-day window: misaligned, so the fallback fires.
+        misaligned = history(hass)
+        await misaligned.async_update([summary], hourly(datetime(2025, 11, 17, 23, tzinfo=UTC)))
+        assert misaligned._hours()[gas_day]["consumption_total"] == 24.0
+
+        # Gas-day window: the readings tile the summary and land on their own hours.
+        aligned = history(hass)
+        await aligned.async_update([summary], hourly(gas_day))
+    spread = aligned._hours()
+    assert spread[gas_day]["consumption_total"] == 1.0
+    assert spread[gas_day + timedelta(hours=12)]["consumption_total"] == 1.0
+    assert sum(row["consumption_total"] for row in spread.values()) == 24.0
+
+
+def test_gas_interval_window_aligns_on_the_gas_day():
+    """A gas request must span the gas day, or its readings cannot tile the summary."""
+
+    obj = client(**{CONF_HISTORY_UNTIL: "2026-04-08T00:00:00+02:00"})
+    obj._meter_type = "gas"
+
+    first = obj._build_quarter_hourly_range(1)
+    assert first["historyFrom"] == "2026-04-06T06:00:00.000+02:00"
+    assert first["historyUntil"] == "2026-04-07T05:59:59.999+02:00"
+
+    # The cutoff falls inside the 07 -> 08 gas day, so that day is not requested:
+    # a window truncated mid-gas-day could not tile the summary either.
+    third = obj._build_quarter_hourly_range(3)
+    assert third["historyFrom"] == "2026-04-04T06:00:00.000+02:00"
+    assert third["historyUntil"] == "2026-04-05T05:59:59.999+02:00"
+
+
+def test_electricity_interval_window_still_uses_calendar_days():
+    """The gas alignment must not shift the electricity window."""
+
+    obj = client(**{CONF_HISTORY_UNTIL: "2026-04-08T00:00:00+02:00"})
+    day_range = obj._build_quarter_hourly_range(1)
+    assert day_range["historyFrom"] == "2026-04-07T00:00:00.000+02:00"
+    assert day_range["historyUntil"] == "2026-04-07T23:59:59.999+02:00"
+
+
 def test_cutoff_lookback_uses_local_dst_offsets():
     obj = client(**{CONF_HISTORY_UNTIL: "2026-03-30T00:00:00+02:00"})
     date_range = obj._build_quarter_hourly_range(2)

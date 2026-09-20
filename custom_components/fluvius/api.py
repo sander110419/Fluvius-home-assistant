@@ -26,6 +26,7 @@ from .const import (
     DEFAULT_METER_TYPE,
     DEFAULT_TIMEZONE,
     DEFAULT_VERBOSE_LOGGING,
+    GAS_DAY_START_HOUR,
     GAS_MIN_LOOKBACK_DAYS,
     GAS_UNIT_CUBIC_METERS,
     INTERVAL_GRANULARITY_CANDIDATES,
@@ -516,6 +517,8 @@ class FluviusApiClient:
         )
 
     def _build_quarter_hourly_range(self, days_back: int) -> dict[str, str]:
+        if self._meter_type == METER_TYPE_GAS:
+            return self._build_gas_day_range(days_back)
         end = self.history_end
         # A cutoff inside a day includes that day's completed intervals.
         anchor = (end - timedelta(microseconds=1)).replace(
@@ -523,6 +526,33 @@ class FluviusApiClient:
         )
         start = anchor - timedelta(days=max(days_back, 1) - 1)
         until = min(start + timedelta(days=1), end) - timedelta(milliseconds=1)
+        return {
+            "historyFrom": start.isoformat(timespec="milliseconds"),
+            "historyUntil": until.isoformat(timespec="milliseconds"),
+        }
+
+    def _build_gas_day_range(self, days_back: int) -> dict[str, str]:
+        """Align a gas request on the 06:00 -> 06:00 gas day.
+
+        Gas daily summaries span the gas day, and statistics.py only replaces a daily
+        total with interval readings when those tile the summary period exactly. A
+        calendar-day window cannot tile a gas day, so the fallback fires and the whole
+        day lands in the 06:00 bucket.
+
+        Unlike electricity the range is therefore never clamped to a history cutoff
+        falling inside a gas day: a truncated window would not tile either. The anchor
+        steps back to the last gas day that had closed by the cutoff instead.
+        """
+
+        end = self.history_end
+        anchor = (end - timedelta(microseconds=1)).replace(
+            hour=GAS_DAY_START_HOUR, minute=0, second=0, microsecond=0
+        )
+        # Wall-clock arithmetic, so the span stays a real day across a DST change.
+        if anchor + timedelta(days=1) > end:
+            anchor -= timedelta(days=1)
+        start = anchor - timedelta(days=max(days_back, 1) - 1)
+        until = start + timedelta(days=1) - timedelta(milliseconds=1)
         return {
             "historyFrom": start.isoformat(timespec="milliseconds"),
             "historyUntil": until.isoformat(timespec="milliseconds"),
