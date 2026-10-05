@@ -1,6 +1,8 @@
 name: Validate
 
 on:
+  schedule:
+    - cron: "0 0 * * *"
   push:
   pull_request:
   workflow_dispatch:
