@@ -33,6 +33,10 @@ class FluviusAuthError(RuntimeError):
     """Raised when one of the HTTP steps fails."""
 
 
+class FluviusInvalidCredentialsError(FluviusAuthError):
+    """Raised when Fluvius explicitly rejects the submitted email and password."""
+
+
 @dataclass
 class PKCEPair:
     verifier: str
@@ -49,21 +53,7 @@ class AsyncFluviusHttpAuthenticator:
     async def authenticate(
         self, username: str, password: str, remember_me: bool = False
     ) -> dict[str, Any]:
-        metadata = await self._fetch_msal_metadata()
-        authority = (
-            metadata.get("authority")
-            or metadata.get("auth", {}).get("authority")
-            or DEFAULT_AUTHORITY
-        ).rstrip("/")
-        client_id = metadata.get("clientId") or metadata.get("auth", {}).get("clientId")
-        if not client_id:
-            raise FluviusAuthError("MSAL config does not expose a clientId")
-        redirect_uri = (
-            metadata.get("redirectUri")
-            or metadata.get("auth", {}).get("redirectUri")
-            or DEFAULT_REDIRECT_URI
-        )
-        scopes = _normalise_scopes(metadata)
+        authority, client_id, redirect_uri, scopes = await self._resolve_client()
 
         pkce = _generate_pkce_pair()
         state = _random_urlsafe(32)
@@ -118,7 +108,43 @@ class AsyncFluviusHttpAuthenticator:
         )
         return token_response
 
+    async def refresh(self, refresh_token: str) -> dict[str, Any]:
+        """Redeem a refresh token without replaying the interactive login."""
+
+        authority, client_id, _, scopes = await self._resolve_client()
+        self._log("Redeeming refresh token...")
+        data = {
+            "client_id": client_id,
+            "scope": scopes,
+            "refresh_token": refresh_token,
+            "grant_type": "refresh_token",
+        }
+        async with self.session.post(
+            f"{authority}/oauth2/v2.0/token", data=data, timeout=TIMEOUT
+        ) as resp:
+            if resp.status != 200:
+                text = await resp.text()
+                raise FluviusAuthError(f"Refresh token rejected ({resp.status}): {text[:200]}")
+            return await resp.json()
+
     # -- helpers ---------------------------------------------------------
+    async def _resolve_client(self) -> tuple[str, str, str, str]:
+        metadata = await self._fetch_msal_metadata()
+        authority = (
+            metadata.get("authority")
+            or metadata.get("auth", {}).get("authority")
+            or DEFAULT_AUTHORITY
+        ).rstrip("/")
+        client_id = metadata.get("clientId") or metadata.get("auth", {}).get("clientId")
+        if not client_id:
+            raise FluviusAuthError("MSAL config does not expose a clientId")
+        redirect_uri = (
+            metadata.get("redirectUri")
+            or metadata.get("auth", {}).get("redirectUri")
+            or DEFAULT_REDIRECT_URI
+        )
+        return authority, client_id, redirect_uri, _normalise_scopes(metadata)
+
     def _log(self, message: str) -> None:
         if self.verbose:
             LOGGER.info(message)
@@ -228,8 +254,13 @@ class AsyncFluviusHttpAuthenticator:
                     raise FluviusAuthError(
                         f"Credential submission returned non-JSON: {text[:200]}"
                     ) from exc
-        status_value = data.get("status")
-        if str(status_value) not in {"200", "success"}:
+        status_value = str(data.get("status"))
+        if status_value == "400":
+            # B2C answers a wrong email/password (AADB2C90053 and friends) with a 400.
+            raise FluviusInvalidCredentialsError(
+                f"Credentials rejected ({data.get('errorCode')}): {data.get('message')}"
+            )
+        if status_value not in {"200", "success"}:
             raise FluviusAuthError(f"Credential submission failed: {data}")
 
     def _build_confirm_url(
@@ -378,4 +409,18 @@ async def async_get_bearer_token(
     access_token = token_response.get("access_token")
     if not access_token:
         raise FluviusAuthError("Token response does not contain an access_token")
+    return access_token, token_response
+
+
+async def async_refresh_bearer_token(
+    session: aiohttp.ClientSession,
+    refresh_token: str,
+    *,
+    verbose: bool = False,
+) -> tuple[str, dict[str, Any]]:
+    authenticator = AsyncFluviusHttpAuthenticator(session, verbose=verbose)
+    token_response = await authenticator.refresh(refresh_token)
+    access_token = token_response.get("access_token")
+    if not access_token:
+        raise FluviusAuthError("Refresh response does not contain an access_token")
     return access_token, token_response

@@ -11,7 +11,12 @@ from typing import Any
 
 import aiohttp
 
-from .auth import FluviusAuthError, async_get_bearer_token
+from .auth import (
+    FluviusAuthError,
+    FluviusInvalidCredentialsError,
+    async_get_bearer_token,
+    async_refresh_bearer_token,
+)
 from .const import (
     ALL_METRICS,
     CONF_DAYS_BACK,
@@ -110,6 +115,7 @@ class FluviusApiClient:
         self._remember_me = remember_me
         self._options = options or {}
         self._access_token: str | None = None
+        self._refresh_token: str | None = None
         self._token_expires = 0.0
         self._verbose = bool(self._options.get(CONF_VERBOSE_LOGGING, DEFAULT_VERBOSE_LOGGING))
 
@@ -190,23 +196,54 @@ class FluviusApiClient:
     async def _async_get_access_token(self) -> str:
         if self._access_token and time.monotonic() < self._token_expires:
             return self._access_token
+        access_token, tokens = await self._async_refresh_access_token() or await self._async_login()
+        if not access_token:
+            raise FluviusApiError("Fluvius returned no access token")
+        self._access_token = access_token
+        self._token_expires = time.monotonic() + max(0, int(tokens.get("expires_in", 3600)) - 60)
+        # B2C may rotate the refresh token; keep the previous one if it does not.
+        self._refresh_token = tokens.get("refresh_token") or self._refresh_token
+        return access_token
+
+    async def _async_refresh_access_token(self) -> tuple[str, dict[str, Any]] | None:
+        """Redeem the stored refresh token, or return None to fall back to a full login."""
+
+        if not self._refresh_token:
+            return None
         try:
-            access_token, tokens = await async_get_bearer_token(
+            return await async_refresh_bearer_token(
+                self._session, self._refresh_token, verbose=self._verbose
+            )
+        except FluviusAuthError as err:
+            LOGGER.debug("Fluvius refresh token no longer usable, logging in again: %s", err)
+            self._refresh_token = None
+            return None
+        except (aiohttp.ClientError, TimeoutError) as err:
+            raise FluviusApiError(
+                f"Cannot reach Fluvius authentication ({type(err).__name__})"
+            ) from err
+
+    async def _async_login(self) -> tuple[str, dict[str, Any]]:
+        """Replay the interactive B2C login with the stored email and password."""
+
+        try:
+            return await async_get_bearer_token(
                 self._session,
                 self._email,
                 self._password,
                 remember_me=self._remember_me,
                 verbose=self._verbose,
             )
+        except FluviusInvalidCredentialsError as err:
+            raise FluviusAuthenticationError(f"Fluvius authentication failed: {err}") from err
         except FluviusAuthError as err:
-            raise FluviusAuthenticationError("Fluvius authentication failed") from err
+            # The login page is scraped, so a changed or degraded page is not proof that
+            # the password is wrong. Retry on the next poll instead of forcing a reauth.
+            raise FluviusApiError(f"Fluvius login flow failed: {err}") from err
         except (aiohttp.ClientError, TimeoutError) as err:
-            raise FluviusApiError("Cannot reach Fluvius authentication") from err
-        if not access_token:
-            raise FluviusAuthenticationError("Fluvius returned no access token")
-        self._access_token = access_token
-        self._token_expires = time.monotonic() + max(0, int(tokens.get("expires_in", 3600)) - 60)
-        return access_token
+            raise FluviusApiError(
+                f"Cannot reach Fluvius authentication ({type(err).__name__})"
+            ) from err
 
     async def _fetch_raw_consumption(self, access_token: str) -> list[dict[str, Any]]:
         # Daily summaries must stay daily even when detailed history is enabled.
@@ -245,7 +282,9 @@ class FluviusApiClient:
                     if response.status == 401:
                         self._access_token = None
                         if attempt:
-                            raise FluviusAuthenticationError("Fluvius rejected the access token")
+                            # Next poll starts over with a full login.
+                            self._refresh_token = None
+                            raise FluviusApiError("Fluvius rejected a freshly issued access token")
                     else:
                         response.raise_for_status()
                         data = await response.json()
@@ -259,7 +298,8 @@ class FluviusApiClient:
                     f"Fluvius {endpoint} request failed ({type(err).__name__})"
                 ) from err
             access_token = await self._async_get_access_token()
-        raise FluviusAuthenticationError("Fluvius rejected the access token")
+        # A token Fluvius just issued was refused, so the credentials themselves work.
+        raise FluviusApiError("Fluvius rejected a freshly issued access token")
 
     @property
     def days_back(self) -> int:

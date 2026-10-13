@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Keep the refresh token from the login and redeem it when the access token expires, instead of replaying the full email/password login every hour for every meter.
+- Only start reauthentication when Fluvius explicitly rejects the email/password. Other login-flow failures (changed or degraded login page, unexpected redirects, token endpoint errors) and a rejected freshly issued token are now retried on the next poll, and their cause is logged.
+
 ## 1.1.0
 
 Requires Home Assistant 2026.5 or newer. After updating, restart Home Assistant and select the new **(historical)** sources in the Energy dashboard. Old sensor history is not automatically rewritten.
