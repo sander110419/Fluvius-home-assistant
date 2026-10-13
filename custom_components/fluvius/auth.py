@@ -34,7 +34,11 @@ class FluviusAuthError(RuntimeError):
 
 
 class FluviusInvalidCredentialsError(FluviusAuthError):
-    """Raised when Fluvius explicitly rejects the submitted email and password."""
+    """SelfAsserted refused the email/password.
+
+    The only FluviusAuthError that proves the stored credentials are wrong; any other
+    one can come from a changed login page.
+    """
 
 
 @dataclass
@@ -109,7 +113,11 @@ class AsyncFluviusHttpAuthenticator:
         return token_response
 
     async def refresh(self, refresh_token: str) -> dict[str, Any]:
-        """Redeem a refresh token without replaying the interactive login."""
+        """A 400/401 means the token is refused and raises FluviusAuthError.
+
+        Any other error status raises aiohttp.ClientResponseError instead, so the
+        caller treats it as transient and keeps the refresh token.
+        """
 
         authority, client_id, _, scopes = await self._resolve_client()
         self._log("Redeeming refresh token...")
@@ -122,9 +130,10 @@ class AsyncFluviusHttpAuthenticator:
         async with self.session.post(
             f"{authority}/oauth2/v2.0/token", data=data, timeout=TIMEOUT
         ) as resp:
-            if resp.status != 200:
+            if resp.status in (400, 401):
                 text = await resp.text()
                 raise FluviusAuthError(f"Refresh token rejected ({resp.status}): {text[:200]}")
+            resp.raise_for_status()
             return await resp.json()
 
     # -- helpers ---------------------------------------------------------
@@ -256,7 +265,8 @@ class AsyncFluviusHttpAuthenticator:
                     ) from exc
         status_value = str(data.get("status"))
         if status_value == "400":
-            # B2C answers a wrong email/password (AADB2C90053 and friends) with a 400.
+            # B2C reports form errors as {"status": "400", "errorCode": ...}; a wrong
+            # email/password comes back as AADB2C90053.
             raise FluviusInvalidCredentialsError(
                 f"Credentials rejected ({data.get('errorCode')}): {data.get('message')}"
             )

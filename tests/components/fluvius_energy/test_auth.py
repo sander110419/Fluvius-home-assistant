@@ -2,7 +2,10 @@
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import aiohttp
 import pytest
+from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.helpers.update_coordinator import UpdateFailed
 
 from custom_components.fluvius.api import (
     FluviusApiClient,
@@ -14,6 +17,7 @@ from custom_components.fluvius.auth import (
     FluviusAuthError,
     FluviusInvalidCredentialsError,
 )
+from custom_components.fluvius.coordinator import FluviusEnergyDataUpdateCoordinator
 
 LOGIN = "custom_components.fluvius.api.async_get_bearer_token"
 REFRESH = "custom_components.fluvius.api.async_refresh_bearer_token"
@@ -52,10 +56,16 @@ class Response:
         return False
 
     def raise_for_status(self):
-        return None
+        if self.status >= 400:
+            raise aiohttp.ClientResponseError(
+                MagicMock(), (), status=self.status, message="Service Unavailable"
+            )
 
     async def json(self):
         return self._payload
+
+    async def text(self):
+        return str(self._payload)
 
 
 async def test_expired_token_is_refreshed_without_login():
@@ -98,6 +108,39 @@ async def test_unreachable_refresh_keeps_refresh_token():
     assert obj._refresh_token == "refresh-1"
 
 
+async def test_refresh_server_error_keeps_refresh_token():
+    session = MagicMock()
+    session.get = MagicMock(return_value=Response(200, {"clientId": "client"}))
+    session.post = MagicMock(return_value=Response(503))
+    obj = client()
+    obj._session = session
+    obj._refresh_token = "refresh-1"
+    login = AsyncMock()
+    with patch(LOGIN, login):
+        with pytest.raises(FluviusApiError, match="HTTP 503") as err:
+            await obj._async_get_access_token()
+    assert not isinstance(err.value, FluviusAuthenticationError)
+    login.assert_not_awaited()
+    assert obj._refresh_token == "refresh-1"
+
+
+@pytest.mark.parametrize(
+    ("failure", "reason"),
+    [
+        (TimeoutError(), "TimeoutError"),
+        (aiohttp.ClientConnectionError("connection reset"), "connection reset"),
+        (aiohttp.ClientResponseError(MagicMock(), (), status=502, message="Bad Gateway"), "502"),
+    ],
+)
+async def test_unreachable_login_is_retryable(failure, reason):
+    obj = client()
+    with patch(LOGIN, AsyncMock(side_effect=failure)):
+        with pytest.raises(FluviusApiError, match=reason) as err:
+            await obj._async_get_access_token()
+    assert not isinstance(err.value, FluviusAuthenticationError)
+    assert "test@example.com" not in str(err.value)
+
+
 async def test_broken_login_flow_is_not_an_auth_failure():
     obj = client()
     failure = FluviusAuthError("Unable to locate `SETTINGS` payload inside the B2C HTML page.")
@@ -127,6 +170,32 @@ async def test_repeated_401_is_retryable_and_forces_next_login():
     assert not isinstance(err.value, FluviusAuthenticationError)
     assert obj._session.get.call_count == 2
     assert obj._refresh_token is None
+
+    login = AsyncMock(return_value=tokens("next", "refresh-3"))
+    refresh = AsyncMock()
+    with patch(LOGIN, login), patch(REFRESH, refresh):
+        assert await obj._async_get_access_token() == "next"
+    login.assert_awaited_once()
+    refresh.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected"),
+    [
+        (FluviusAuthError("Authorization pipeline did not redirect to redirect_uri"), UpdateFailed),
+        (
+            FluviusInvalidCredentialsError("Credentials rejected (AADB2C90053)"),
+            ConfigEntryAuthFailed,
+        ),
+    ],
+)
+async def test_coordinator_reauths_only_on_rejected_credentials(hass, failure, expected):
+    obj = client()
+    coordinator = FluviusEnergyDataUpdateCoordinator(hass, obj, MagicMock())
+    with patch(LOGIN, AsyncMock(side_effect=failure)):
+        with pytest.raises(expected) as err:
+            await coordinator._async_update_data()
+    assert str(failure) in str(err.value)
 
 
 @pytest.mark.parametrize(

@@ -200,9 +200,6 @@ class FluviusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         except FluviusAuthenticationError as err:
             raise InvalidAuth from err
         except FluviusApiError as err:
-            message = str(err).lower()
-            if any(key in message for key in ("auth", "password", "credentials")):
-                raise InvalidAuth from err
             raise CannotConnect from err
 
 

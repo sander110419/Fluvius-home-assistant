@@ -2,8 +2,9 @@
 
 ## Unreleased
 
-- Keep the refresh token from the login and redeem it when the access token expires, instead of replaying the full email/password login every hour for every meter.
-- Only start reauthentication when Fluvius explicitly rejects the email/password. Other login-flow failures (changed or degraded login page, unexpected redirects, token endpoint errors) and a rejected freshly issued token are now retried on the next poll, and their cause is logged.
+- Redeem the stored refresh token when the access token expires instead of replaying the email/password login every hour for every meter. A full login happens only when Fluvius refuses the refresh token.
+- Start reauthentication only when Fluvius rejects the email/password (`AADB2C90053`). A changed or degraded login page, unexpected redirects, token endpoint errors, network errors and a 401 on a freshly issued token now fail the update and retry on the next poll, with the cause in the error message.
+- Setup and reauthentication show "Unable to reach the Fluvius API" for those failures instead of "Invalid email, password, or meter information."
 
 ## 1.1.0
 

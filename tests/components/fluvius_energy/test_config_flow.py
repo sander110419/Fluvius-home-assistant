@@ -9,7 +9,7 @@ from homeassistant import data_entry_flow
 from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.fluvius.api import FluviusAuthenticationError
+from custom_components.fluvius.api import FluviusApiError, FluviusAuthenticationError
 from custom_components.fluvius.const import (
     CONF_EAN,
     CONF_METER_SERIAL,
@@ -82,6 +82,39 @@ async def test_user_flow_invalid_auth(hass):
 
     assert result["type"] == data_entry_flow.FlowResultType.FORM
     assert result["errors"]["base"] == "invalid_auth"
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Fluvius login flow failed: Authorization pipeline did not redirect to redirect_uri",
+        "Cannot reach Fluvius authentication (TimeoutError)",
+    ],
+)
+async def test_user_flow_login_failure_is_cannot_connect(hass, message):
+    """Only a credential rejection may tell the user their password is wrong."""
+
+    with (
+        patch(
+            "custom_components.fluvius.config_flow.async_create_fluvius_session",
+            return_value=MagicMock(),
+        ),
+        patch(
+            "custom_components.fluvius.config_flow.FluviusApiClient",
+            autospec=True,
+        ) as mock_client,
+    ):
+        instance = mock_client.return_value
+        instance.fetch_daily_summaries = AsyncMock(side_effect=FluviusApiError(message))
+
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": "user"},
+            data=USER_INPUT,
+        )
+
+    assert result["type"] == data_entry_flow.FlowResultType.FORM
+    assert result["errors"]["base"] == "cannot_connect"
 
 
 async def test_reauth_updates_entry(hass):

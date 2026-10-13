@@ -59,6 +59,13 @@ class FluviusAuthenticationError(FluviusApiError):
     """Credentials must be updated through Home Assistant reauthentication."""
 
 
+def _transport_reason(err: aiohttp.ClientError | TimeoutError) -> str:
+    # str(ClientResponseError) embeds the request URL, which carries the email as login_hint.
+    if isinstance(err, aiohttp.ClientResponseError):
+        return f"HTTP {err.status} {err.message}"
+    return f"{type(err).__name__}: {err}" if str(err) else type(err).__name__
+
+
 @dataclass(slots=True)
 class FluviusDailySummary:
     """Container for a single day of energy data."""
@@ -201,12 +208,17 @@ class FluviusApiClient:
             raise FluviusApiError("Fluvius returned no access token")
         self._access_token = access_token
         self._token_expires = time.monotonic() + max(0, int(tokens.get("expires_in", 3600)) - 60)
-        # B2C may rotate the refresh token; keep the previous one if it does not.
+        # B2C may rotate the refresh token on redemption; keep the old one if it does not.
         self._refresh_token = tokens.get("refresh_token") or self._refresh_token
         return access_token
 
     async def _async_refresh_access_token(self) -> tuple[str, dict[str, Any]] | None:
-        """Redeem the stored refresh token, or return None to fall back to a full login."""
+        """Return None when the caller must log in with the password.
+
+        That is the case without a refresh token, or when Fluvius refuses it (the token
+        is then forgotten). A transport failure raises and keeps the token, so a network
+        blip does not cost a password login on the next poll.
+        """
 
         if not self._refresh_token:
             return None
@@ -220,11 +232,16 @@ class FluviusApiClient:
             return None
         except (aiohttp.ClientError, TimeoutError) as err:
             raise FluviusApiError(
-                f"Cannot reach Fluvius authentication ({type(err).__name__})"
+                f"Cannot reach Fluvius authentication ({_transport_reason(err)})"
             ) from err
 
     async def _async_login(self) -> tuple[str, dict[str, Any]]:
-        """Replay the interactive B2C login with the stored email and password."""
+        """Only an explicit SelfAsserted rejection is a credential failure.
+
+        The login page is scraped, so a changed or degraded page, a redirect we do not
+        recognise or a token endpoint error says nothing about the password. Those stay
+        retryable instead of forcing the user through reauth.
+        """
 
         try:
             return await async_get_bearer_token(
@@ -237,12 +254,10 @@ class FluviusApiClient:
         except FluviusInvalidCredentialsError as err:
             raise FluviusAuthenticationError(f"Fluvius authentication failed: {err}") from err
         except FluviusAuthError as err:
-            # The login page is scraped, so a changed or degraded page is not proof that
-            # the password is wrong. Retry on the next poll instead of forcing a reauth.
             raise FluviusApiError(f"Fluvius login flow failed: {err}") from err
         except (aiohttp.ClientError, TimeoutError) as err:
             raise FluviusApiError(
-                f"Cannot reach Fluvius authentication ({type(err).__name__})"
+                f"Cannot reach Fluvius authentication ({_transport_reason(err)})"
             ) from err
 
     async def _fetch_raw_consumption(self, access_token: str) -> list[dict[str, Any]]:
@@ -282,7 +297,8 @@ class FluviusApiClient:
                     if response.status == 401:
                         self._access_token = None
                         if attempt:
-                            # Next poll starts over with a full login.
+                            # The token we just got is refused too; start the next poll
+                            # from a full login instead of the same refresh token.
                             self._refresh_token = None
                             raise FluviusApiError("Fluvius rejected a freshly issued access token")
                     else:
@@ -298,7 +314,6 @@ class FluviusApiClient:
                     f"Fluvius {endpoint} request failed ({type(err).__name__})"
                 ) from err
             access_token = await self._async_get_access_token()
-        # A token Fluvius just issued was refused, so the credentials themselves work.
         raise FluviusApiError("Fluvius rejected a freshly issued access token")
 
     @property
