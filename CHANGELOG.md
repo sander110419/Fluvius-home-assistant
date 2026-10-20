@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.3.0
+
+Requires Home Assistant 2026.5 or newer. No reconfiguration is needed. On the first refresh after updating, each energy exchange backfills its monthly history (walking back up to five calendar years); afterwards, refreshes only fetch current data. Historical monthly series appear as new **(shared energy)** sources for the Energy dashboard; consumption and injection statistics are never touched.
+
+- Backfill monthly energiedelen (energy sharing) history per energy exchange, including previous calendar years, and import it as cumulative monthly external statistics that follow Fluvius corrections ([#28](https://github.com/sander110419/Fluvius-home-assistant/issues/28)).
+- Disambiguate sensors when an account has multiple energy exchanges: the exchange name and ID are appended to the sensor name (e.g. `(Vriendengroep #62338)`).
+- Expose the full monthly history as a `monthly_history_kwh` attribute on the "this year" sharing sensors.
+
+Validated with 67 tests on Home Assistant 2026.5 and a running Home Assistant instance, verifying that existing statistic IDs and rows are never overwritten for accounts without energy sharing.
+
 ## 1.2.0
 
 Requires Home Assistant 2026.5 or newer. No reconfiguration is needed: token storage is added automatically on the first refresh after updating. Accounts participating in energiedelen (energy sharing) get new sensors after the restart; all other accounts see no new entities.
