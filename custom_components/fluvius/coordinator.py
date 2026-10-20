@@ -19,7 +19,7 @@ from .api import (
     FluviusQuarterHourlyMeasurement,
 )
 from .const import DEFAULT_UPDATE_INTERVAL
-from .statistics import FluviusStatistics
+from .statistics import FluviusSharingStatistics, FluviusStatistics
 from .store import FluviusEnergyStore
 
 LOGGER = logging.getLogger(__name__)
@@ -45,6 +45,7 @@ class FluviusEnergyDataUpdateCoordinator(DataUpdateCoordinator[FluviusCoordinato
         client: FluviusApiClient,
         store: FluviusEnergyStore,
         statistics: FluviusStatistics | None = None,
+        sharing_statistics: FluviusSharingStatistics | None = None,
     ) -> None:
         super().__init__(
             hass, LOGGER, name="Fluvius energy coordinator", update_interval=DEFAULT_UPDATE_INTERVAL
@@ -52,6 +53,7 @@ class FluviusEnergyDataUpdateCoordinator(DataUpdateCoordinator[FluviusCoordinato
         self._client = client
         self._store = store
         self._statistics = statistics
+        self._sharing_statistics = sharing_statistics
 
     async def _async_update_data(self) -> FluviusCoordinatorData:
         summaries, peaks, intervals = [], [], []
@@ -85,6 +87,17 @@ class FluviusEnergyDataUpdateCoordinator(DataUpdateCoordinator[FluviusCoordinato
         energy_sharing = previous.energy_sharing if previous else []
         try:
             energy_sharing = await self._client.fetch_energy_sharing()
+            if self._sharing_statistics is not None and energy_sharing:
+                pending = {
+                    summary.exchange_id
+                    for summary in energy_sharing
+                    if self._sharing_statistics.needs_backfill(summary.exchange_id)
+                }
+                if pending:
+                    # One-off multi-year backfill per exchange; on failure the
+                    # flag is not set, so the next refresh retries the walk.
+                    energy_sharing = await self._client.fetch_energy_sharing(history_for=pending)
+                await self._sharing_statistics.async_update(energy_sharing, backfilled_ids=pending)
         except FluviusAuthenticationError as err:
             raise ConfigEntryAuthFailed(str(err)) from err
         except FluviusApiError as err:

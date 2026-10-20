@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from datetime import UTC
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -260,11 +261,19 @@ async def async_setup_entry(
     sharing_data = coordinator.data.energy_sharing if coordinator.data else []
     if meter_type != METER_TYPE_GAS:
         for summary in sharing_data:
-            suffix = f" ({summary.name})" if summary.name and len(sharing_data) > 1 else ""
+            if len(sharing_data) > 1:
+                # Multiple exchanges: always disambiguate, even when Fluvius
+                # reports identical (or no) names for the agreements.
+                label = f"{summary.name} " if summary.name else ""
+                suffix = f" ({label}#{summary.exchange_id})"
+            else:
+                suffix = ""
             for metric, translation_key, name in ENERGY_SHARING_SENSOR_KINDS:
                 description = SensorEntityDescription(
                     key=f"energy_sharing_{metric}",
-                    translation_key=translation_key,
+                    # translation_key wins over name, so only use it when no
+                    # disambiguating suffix is present.
+                    translation_key=None if suffix else translation_key,
                     name=f"{name}{suffix}",
                     device_class=SensorDeviceClass.ENERGY,
                     native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
@@ -632,9 +641,19 @@ class FluviusEnergySharingSensor(
         summary = self._summary()
         if not summary:
             return None
-        return {
+        attributes: dict[str, Any] = {
             "energy_exchange_id": summary.exchange_id,
             "energy_exchange_name": summary.name,
             "daily_buckets": len(summary.daily),
             "monthly_buckets": len(summary.monthly),
         }
+        if self._metric.endswith("_year"):
+            # Full monthly history (including backfilled years) for inspection.
+            field = "consumption" if self._metric.startswith("received") else "injection"
+            attributes["monthly_history_kwh"] = {
+                measurement.start.astimezone(UTC).isoformat()[:7]: round(
+                    getattr(measurement, field), 3
+                )
+                for measurement in summary.monthly
+            }
+        return attributes

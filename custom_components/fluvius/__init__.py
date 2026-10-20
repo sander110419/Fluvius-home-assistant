@@ -34,7 +34,7 @@ from .const import (
 from .coordinator import FluviusEnergyDataUpdateCoordinator
 from .http import async_create_fluvius_session
 from .models import FluviusRuntimeData
-from .statistics import FluviusStatistics, statistic_prefix
+from .statistics import FluviusSharingStatistics, FluviusStatistics, statistic_prefix
 from .store import FluviusEnergyStore, FluviusTokenStore
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
@@ -101,7 +101,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "m3" if store_unit == "m3" else "kWh",
     )
     await statistics.async_load()
-    coordinator = FluviusEnergyDataUpdateCoordinator(hass, client, store, statistics)
+    sharing_statistics = FluviusSharingStatistics(
+        hass,
+        prefix,
+        f"Fluvius {entry.data[CONF_METER_SERIAL]}",
+    )
+    await sharing_statistics.async_load()
+    coordinator = FluviusEnergyDataUpdateCoordinator(
+        hass, client, store, statistics, sharing_statistics
+    )
     try:
         await coordinator.async_config_entry_first_refresh()
     except ConfigEntryNotReady, ConfigEntryAuthFailed:

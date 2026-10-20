@@ -57,6 +57,8 @@ ENERGIEDELEN_API_BASE = "https://mijn.fluvius.be/energiedelen/api"
 # 6 = month view (day-bucketed), 7 = year view (month-bucketed).
 CHART_PERIOD_TYPE_MONTH = 6
 CHART_PERIOD_TYPE_YEAR = 7
+# Maximum number of past calendar years to backfill for energiedelen history.
+MAX_SHARING_HISTORY_YEARS = 5
 
 
 class FluviusApiError(RuntimeError):
@@ -220,12 +222,18 @@ class FluviusApiClient:
                     measurements[measurement.start] = measurement
         return sorted(measurements.values(), key=lambda item: item.start)
 
-    async def fetch_energy_sharing(self) -> list[FluviusEnergySharingSummary]:
+    async def fetch_energy_sharing(
+        self, *, history_for: set[int] | None = None
+    ) -> list[FluviusEnergySharingSummary]:
         """Fetch energiedelen (energy sharing) exchanged energy, if any.
 
         Accounts without energy sharing get an empty list. Failures never block
         the regular consumption polling: callers should treat FluviusApiError
         as "sharing temporarily unavailable".
+
+        ``history_for`` lists exchange IDs that need a multi-year backfill: for
+        those, month buckets are also requested for past calendar years (walking
+        back until an empty year, capped at MAX_SHARING_HISTORY_YEARS).
         """
         if self._meter_type == METER_TYPE_GAS:
             return []
@@ -241,6 +249,7 @@ class FluviusApiClient:
 
         tz = self._resolve_timezone(self._options.get(CONF_TIMEZONE, DEFAULT_TIMEZONE))
         (month_start, month_end), (year_start, year_end) = self._energy_sharing_ranges(tz)
+        history_for = history_for or set()
         summaries: list[FluviusEnergySharingSummary] = []
         for exchange in exchanges:
             if not isinstance(exchange, dict):
@@ -258,9 +267,33 @@ class FluviusApiClient:
             summary.monthly = await self._fetch_exchanged_energy(
                 summary.exchange_id, CHART_PERIOD_TYPE_YEAR, year_start, year_end
             )
+            if summary.exchange_id in history_for:
+                summary.monthly = await self._fetch_sharing_history(
+                    summary.exchange_id, summary.monthly, year_start, tz
+                )
             summary.compute_totals(tz)
             summaries.append(summary)
         return summaries
+
+    async def _fetch_sharing_history(
+        self,
+        exchange_id: int,
+        current_monthly: list[FluviusEnergySharingMeasurement],
+        current_year_start: datetime,
+        tz,
+    ) -> list[FluviusEnergySharingMeasurement]:
+        """Walk back past calendar years until one returns no month buckets."""
+        merged = {m.start: m for m in current_monthly}
+        for years_back in range(1, MAX_SHARING_HISTORY_YEARS + 1):
+            start = current_year_start.replace(year=current_year_start.year - years_back)
+            end = current_year_start.replace(year=current_year_start.year - years_back + 1)
+            buckets = await self._fetch_exchanged_energy(
+                exchange_id, CHART_PERIOD_TYPE_YEAR, start, end
+            )
+            if not buckets:
+                break
+            merged.update({m.start: m for m in buckets})
+        return [merged[key] for key in sorted(merged)]
 
     async def _fetch_summaries_and_spikes(
         self,

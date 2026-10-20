@@ -13,7 +13,7 @@ from homeassistant.const import UnitOfVolume
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 
-from .api import FluviusDailySummary, FluviusQuarterHourlyMeasurement
+from .api import FluviusDailySummary, FluviusEnergySharingSummary, FluviusQuarterHourlyMeasurement
 from .const import DOMAIN, LIFETIME_METRICS
 
 METRICS = (*LIFETIME_METRICS, "consumption_total", "injection_total")
@@ -151,3 +151,86 @@ class FluviusStatistics:
         }
         totals["net_consumption"] = totals["consumption_total"] - totals["injection_total"]
         return totals
+
+
+class FluviusSharingStatistics:
+    """Import monthly energiedelen (energy sharing) buckets as external statistics.
+
+    Statistic IDs always contain ``_sharing_<exchange_id>_``, which makes a
+    collision with the consumption/injection series (and therefore overwriting
+    the 15-minute or hourly data) impossible: external statistics upsert by ID.
+    Raw month buckets are stored so a retry, restart or correction rebuilds the
+    cumulative series idempotently.
+    """
+
+    def __init__(self, hass: HomeAssistant, prefix: str, name: str) -> None:
+        self.hass = hass
+        self.prefix = prefix
+        self.name = name
+        self._store = Store(hass, 1, f"{DOMAIN}_sharing_history_{prefix}")
+        self._data: dict = {"exchanges": {}}
+
+    async def async_load(self) -> None:
+        self._data = await self._store.async_load() or {"exchanges": {}}
+
+    def needs_backfill(self, exchange_id: int) -> bool:
+        """True when no multi-year history fetch has completed for this exchange."""
+        exchange = self._data.get("exchanges", {}).get(str(exchange_id), {})
+        return not exchange.get("backfilled", False)
+
+    async def async_update(
+        self,
+        summaries: list[FluviusEnergySharingSummary],
+        backfilled_ids: set[int] | None = None,
+    ) -> None:
+        """Store monthly buckets and (re)import cumulative series that changed."""
+        backfilled_ids = backfilled_ids or set()
+        changed = False
+        for summary in summaries:
+            exchange = self._data["exchanges"].setdefault(
+                str(summary.exchange_id), {"months": {}, "backfilled": False}
+            )
+            months = exchange["months"]
+            for measurement in summary.monthly:
+                key = measurement.start.astimezone(UTC).isoformat()
+                value = {
+                    "received": round(measurement.consumption, 4),
+                    "injected": round(measurement.injection, 4),
+                }
+                if months.get(key) != value:
+                    months[key] = value
+                    changed = True
+            if summary.exchange_id in backfilled_ids and not exchange["backfilled"]:
+                exchange["backfilled"] = True
+                changed = True
+        if changed:
+            await self._store.async_save(self._data)
+            self._import()
+
+    def _import(self) -> None:
+        for exchange_id, exchange in sorted(self._data["exchanges"].items()):
+            months = exchange.get("months", {})
+            if not months:
+                continue
+            starts = sorted(datetime.fromisoformat(key) for key in months)
+            for metric, field in (("received", "received"), ("injected", "injected")):
+                statistics: list[StatisticData] = [
+                    {"start": starts[0] - timedelta(hours=1), "sum": 0.0, "state": 0.0}
+                ]
+                total = 0.0
+                for start in starts:
+                    total = round(total + months[start.isoformat()][field], 6)
+                    statistics.append({"start": start, "sum": total, "state": total})
+                async_add_external_statistics(
+                    self.hass,
+                    {
+                        "source": DOMAIN,
+                        "statistic_id": f"{DOMAIN}:{self.prefix}_sharing_{exchange_id}_{metric}",
+                        "name": f"{self.name} shared energy {metric} (exchange {exchange_id})",
+                        "unit_of_measurement": "kWh",
+                        "unit_class": "energy",
+                        "has_sum": True,
+                        "mean_type": StatisticMeanType.NONE,
+                    },
+                    statistics,
+                )
