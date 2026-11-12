@@ -1,8 +1,8 @@
 # Changelog
 
-## Unreleased
+## 1.4.0
 
-No reconfiguration is needed. Existing entries keep their devices, entities, statistic IDs and stored history.
+Requires Home Assistant 2026.5 or newer. No reconfiguration is needed. Existing entries keep their devices, entities, statistic IDs and stored history.
 
 - Support several meters that share one EAN: add each meter as its own entry with its serial number. The first meter on an EAN keeps the existing IDs; every additional meter gets its own device, sensors and historical statistics, with the serial number in the statistic ID ([#30](https://github.com/sander110419/Fluvius-home-assistant/issues/30)).
 - Energiedelen (energy sharing) is registered per EAN, so its sensors are created on the first meter of an EAN only.
