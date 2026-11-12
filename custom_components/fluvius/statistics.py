@@ -9,19 +9,34 @@ from hashlib import sha256
 
 from homeassistant.components.recorder.models import StatisticData, StatisticMeanType
 from homeassistant.components.recorder.statistics import async_add_external_statistics
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfVolume
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 
 from .api import FluviusDailySummary, FluviusEnergySharingSummary, FluviusQuarterHourlyMeasurement
-from .const import DOMAIN, LIFETIME_METRICS
+from .const import CONF_EAN, DOMAIN, LIFETIME_METRICS, METER_TYPE_GAS
 
 METRICS = (*LIFETIME_METRICS, "consumption_total", "injection_total")
 
 
-def statistic_prefix(ean: str, meter_type: str, unit: str, history_until: str | None = None) -> str:
+def meter_key(entry: ConfigEntry) -> str:
+    """Identify one meter for its statistics, storage and device.
+
+    The first meter configured on an EAN owns the bare EAN, so every existing
+    statistic ID, store and device stays exactly as it was. Additional meters on
+    the same EAN carry ``<ean>_<serial>`` as config entry unique ID and are keyed
+    on that, so two meters never write into the same series. Anything that is
+    not such an additional meter resolves to the EAN, as it always did.
+    """
+    ean = entry.data[CONF_EAN]
+    unique_id = entry.unique_id or ""
+    return unique_id if unique_id.startswith(f"{ean}_") else ean
+
+
+def statistic_prefix(key: str, meter_type: str, unit: str, history_until: str | None = None) -> str:
     """Keep IDs stable across entry recreation and separate incompatible histories."""
-    prefix = f"{ean}_{meter_type}_{unit}"
+    prefix = f"{key}_{meter_type}_{unit}"
     if history_until:
         prefix += "_until_" + sha256(history_until.encode()).hexdigest()[:12]
     return prefix
@@ -48,6 +63,9 @@ class FluviusStatistics:
         self.name = name
         self.unit = UnitOfVolume.CUBIC_METERS if unit == "m3" else unit
         self._store = Store(hass, 1, f"{DOMAIN}_history_{prefix}")
+        # <meter key>_<meter type>_<unit>[_until_<hash>]: read the type from its own
+        # field, because a meter key holding a serial may contain any letters.
+        self._is_gas = prefix.split("_until_")[0].rsplit("_", 2)[-2:-1] == [METER_TYPE_GAS]
         self._data: dict = {"days": {}, "intervals": {}}
         self._needs_import = True
 
@@ -119,7 +137,7 @@ class FluviusStatistics:
         first_hour, last_hour = min(hours), max(hours)
         baseline = first_hour - timedelta(hours=1)
         for metric in METRICS:
-            if "gas" in self.prefix and metric.startswith("injection"):
+            if self._is_gas and metric.startswith("injection"):
                 continue
             total = 0.0
             statistics: list[StatisticData] = [{"start": baseline, "sum": 0.0, "state": 0.0}]

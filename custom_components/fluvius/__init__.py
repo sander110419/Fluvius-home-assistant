@@ -34,7 +34,7 @@ from .const import (
 from .coordinator import FluviusEnergyDataUpdateCoordinator
 from .http import async_create_fluvius_session
 from .models import FluviusRuntimeData
-from .statistics import FluviusSharingStatistics, FluviusStatistics, statistic_prefix
+from .statistics import FluviusSharingStatistics, FluviusStatistics, meter_key, statistic_prefix
 from .store import FluviusEnergyStore, FluviusTokenStore
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
@@ -88,9 +88,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     store_unit = options.get(CONF_GAS_UNIT, DEFAULT_GAS_UNIT)
     if meter_type != METER_TYPE_GAS:
         store_unit = GAS_UNIT_KWH
-    prefix = statistic_prefix(
-        entry.data[CONF_EAN], meter_type, store_unit, options[CONF_HISTORY_UNTIL]
-    )
+    key = meter_key(entry)
+    prefix = statistic_prefix(key, meter_type, store_unit, options[CONF_HISTORY_UNTIL])
     store = FluviusEnergyStore(hass, prefix, store_unit)
     await store.async_load()
 
@@ -101,14 +100,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "m3" if store_unit == "m3" else "kWh",
     )
     await statistics.async_load()
-    sharing_statistics = FluviusSharingStatistics(
-        hass,
-        prefix,
-        f"Fluvius {entry.data[CONF_METER_SERIAL]}",
-    )
-    await sharing_statistics.async_load()
+    # Energiedelen is registered per EAN, not per meter: only the entry that owns
+    # the bare EAN reports it, so meters sharing an EAN do not duplicate it.
+    owns_ean = key == entry.data[CONF_EAN]
+    sharing_statistics = None
+    if owns_ean:
+        sharing_statistics = FluviusSharingStatistics(
+            hass,
+            prefix,
+            f"Fluvius {entry.data[CONF_METER_SERIAL]}",
+        )
+        await sharing_statistics.async_load()
     coordinator = FluviusEnergyDataUpdateCoordinator(
-        hass, client, store, statistics, sharing_statistics
+        hass, client, store, statistics, sharing_statistics, energy_sharing=owns_ean
     )
     try:
         await coordinator.async_config_entry_first_refresh()

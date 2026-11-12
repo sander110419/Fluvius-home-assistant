@@ -46,6 +46,7 @@ class FluviusEnergyDataUpdateCoordinator(DataUpdateCoordinator[FluviusCoordinato
         store: FluviusEnergyStore,
         statistics: FluviusStatistics | None = None,
         sharing_statistics: FluviusSharingStatistics | None = None,
+        energy_sharing: bool = True,
     ) -> None:
         super().__init__(
             hass, LOGGER, name="Fluvius energy coordinator", update_interval=DEFAULT_UPDATE_INTERVAL
@@ -54,6 +55,7 @@ class FluviusEnergyDataUpdateCoordinator(DataUpdateCoordinator[FluviusCoordinato
         self._store = store
         self._statistics = statistics
         self._sharing_statistics = sharing_statistics
+        self._energy_sharing = energy_sharing
 
     async def _async_update_data(self) -> FluviusCoordinatorData:
         summaries, peaks, intervals = [], [], []
@@ -86,7 +88,8 @@ class FluviusEnergyDataUpdateCoordinator(DataUpdateCoordinator[FluviusCoordinato
         previous = self.data
         energy_sharing = previous.energy_sharing if previous else []
         try:
-            energy_sharing = await self._client.fetch_energy_sharing()
+            if self._energy_sharing:
+                energy_sharing = await self._client.fetch_energy_sharing()
             if self._sharing_statistics is not None and energy_sharing:
                 pending = {
                     summary.exchange_id

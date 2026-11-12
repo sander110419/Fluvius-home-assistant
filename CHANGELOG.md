@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+No reconfiguration is needed. Existing entries keep their devices, entities, statistic IDs and stored history.
+
+- Support several meters that share one EAN: add each meter as its own entry with its serial number. The first meter on an EAN keeps the existing IDs; every additional meter gets its own device, sensors and historical statistics, with the serial number in the statistic ID ([#30](https://github.com/sander110419/Fluvius-home-assistant/issues/30)).
+- Energiedelen (energy sharing) is registered per EAN, so its sensors are created on the first meter of an EAN only.
+
+Validated with 87 tests on Home Assistant 2026.5 and a running Home Assistant instance, verifying that devices, entities, statistic IDs, statistic rows and stored history of existing entries are unchanged after the update. Two meters on one EAN are covered by tests only; feedback from users with such a setup is welcome.
+
 ## 1.3.0
 
 Requires Home Assistant 2026.5 or newer. No reconfiguration is needed. On the first refresh after updating, each energy exchange backfills its monthly history (walking back up to five calendar years); afterwards, refreshes only fetch current data. Historical monthly series appear as new **(shared energy)** sources for the Energy dashboard; consumption and injection statistics are never touched.

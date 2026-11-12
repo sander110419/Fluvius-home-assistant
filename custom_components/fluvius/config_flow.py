@@ -24,6 +24,7 @@ from homeassistant.helpers.selector import (
     TextSelectorConfig,
     TextSelectorType,
 )
+from homeassistant.util import slugify
 
 from .api import FluviusApiClient, FluviusApiError, FluviusAuthenticationError
 from .const import (
@@ -54,6 +55,7 @@ from .const import (
     QUARTER_HOURLY_GRANULARITY,
 )
 from .http import async_create_fluvius_session
+from .statistics import meter_key
 
 DATA_SCHEMA = vol.Schema(
     {
@@ -171,9 +173,28 @@ class FluviusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     await self.hass.config_entries.async_reload(reauth_entry.entry_id)
                     return self.async_abort(reason="reauth_successful")
 
-                await self.async_set_unique_id(data[CONF_EAN])
+                ean = data[CONF_EAN]
+                serial = slugify(data[CONF_METER_SERIAL], separator="_")
+                same_ean = [
+                    entry
+                    for entry in self._async_current_entries()
+                    if entry.data.get(CONF_EAN) == ean
+                ]
+                if any(
+                    slugify(entry.data.get(CONF_METER_SERIAL, ""), separator="_") == serial
+                    for entry in same_ean
+                ):
+                    return self.async_abort(reason="already_configured")
+                # The first meter on an EAN owns the bare EAN, which keeps existing
+                # statistic IDs and devices stable. Further meters sharing that EAN
+                # are told apart by their serial number.
+                title = f"Fluvius {ean}"
+                unique_id = ean
+                if any(meter_key(entry) == ean for entry in same_ean):
+                    title = f"{title} ({data[CONF_METER_SERIAL]})"
+                    unique_id = f"{ean}_{serial}"
+                await self.async_set_unique_id(unique_id)
                 self._abort_if_unique_id_configured()
-                title = f"Fluvius {data[CONF_EAN]}"
                 return self.async_create_entry(
                     title=title, data=data, options={CONF_GAS_UNIT: gas_unit}
                 )

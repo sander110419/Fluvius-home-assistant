@@ -8,7 +8,7 @@ Import electricity and gas consumption from Mijn Fluvius into Home Assistant. Fl
 - A **personal** Mijn Fluvius account that supports email/password login, the meter's EAN and serial number, and access to its consumption history.
 - For detailed history, enable electricity quarter-hour or gas hourly readings in Mijn Fluvius. Permission given to an energy supplier alone does not guarantee that those readings are available to your portal account.
 
-Install through HACS, or copy `custom_components/fluvius` to your configuration directory and restart Home Assistant. Add **Fluvius Energy** under **Settings → Devices & services**. Create one entry per EAN. For gas, select **kWh** or **m3** during setup, before the first import.
+Install through HACS, or copy `custom_components/fluvius` to your configuration directory and restart Home Assistant. Add **Fluvius Energy** under **Settings → Devices & services**. Create one entry per meter. Meters that share an EAN are added separately, each with its own serial number: the first one keeps the EAN-only statistic IDs, the others get IDs that include their serial number. For gas, select **kWh** or **m3** during setup, before the first import.
 
 Professional accounts requiring eID/itsme cannot use the password login in this integration. Fluvius confirms that [professional accounts require interactive authentication](https://www.fluvius.be/nl/veelgestelde-vragen/mijn-fluvius/organisatie). Its [professional data API](https://partner.fluvius.be/nl/energiedienstverleners/ontsluiten-verbruiksdata-api) is a different service and is not implemented here.
 

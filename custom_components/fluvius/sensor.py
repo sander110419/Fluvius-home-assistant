@@ -25,7 +25,6 @@ from .api import (
     FluviusQuarterHourlyMeasurement,
 )
 from .const import (
-    CONF_EAN,
     CONF_GAS_UNIT,
     CONF_HISTORY_UNTIL,
     CONF_METER_SERIAL,
@@ -39,7 +38,7 @@ from .const import (
 )
 from .coordinator import FluviusCoordinatorData, FluviusEnergyDataUpdateCoordinator
 from .models import FluviusRuntimeData
-from .statistics import statistic_prefix
+from .statistics import meter_key, statistic_prefix
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -193,7 +192,7 @@ async def async_setup_entry(
 
     runtime_data: FluviusRuntimeData = entry.runtime_data
     coordinator: FluviusEnergyDataUpdateCoordinator = runtime_data.coordinator
-    ean = entry.data[CONF_EAN]
+    meter_id = meter_key(entry)
     meter_serial = entry.data[CONF_METER_SERIAL]
     meter_type = entry.data.get(CONF_METER_TYPE, DEFAULT_METER_TYPE)
     gas_unit = entry.options.get(CONF_GAS_UNIT, DEFAULT_GAS_UNIT)
@@ -212,13 +211,13 @@ async def async_setup_entry(
         ]
 
     entities = [
-        FluviusEnergySensor(description, coordinator, entry.entry_id, ean, meter_serial)
+        FluviusEnergySensor(description, coordinator, entry.entry_id, meter_id, meter_serial)
         for description in descriptions
     ]
     if meter_type == METER_TYPE_ELECTRICITY:
         entities.append(
             FluviusPeakPowerSensor(
-                PEAK_POWER_DESCRIPTION, coordinator, entry.entry_id, ean, meter_serial
+                PEAK_POWER_DESCRIPTION, coordinator, entry.entry_id, meter_id, meter_serial
             )
         )
 
@@ -244,16 +243,16 @@ async def async_setup_entry(
         )
     entities.append(
         FluviusQuarterHourlyConsumptionSensor(
-            quarter_hourly_consumption_desc, coordinator, entry.entry_id, ean, meter_serial
+            quarter_hourly_consumption_desc, coordinator, entry.entry_id, meter_id, meter_serial
         )
     )
     entities.append(
         FluviusQuarterHourlyInjectionSensor(
-            quarter_hourly_injection_desc, coordinator, entry.entry_id, ean, meter_serial
+            quarter_hourly_injection_desc, coordinator, entry.entry_id, meter_id, meter_serial
         )
     )
     unit = gas_unit if meter_type == METER_TYPE_GAS else "kwh"
-    prefix = statistic_prefix(ean, meter_type, unit, entry.options.get(CONF_HISTORY_UNTIL))
+    prefix = statistic_prefix(meter_id, meter_type, unit, entry.options.get(CONF_HISTORY_UNTIL))
 
     # Energy sharing (energiedelen): one sensor set per energy exchange. The
     # coordinator already fetched sharing data during the first refresh, so
@@ -285,7 +284,7 @@ async def async_setup_entry(
                         description,
                         coordinator,
                         entry.entry_id,
-                        ean,
+                        meter_id,
                         meter_serial,
                         summary.exchange_id,
                         metric,
@@ -322,7 +321,7 @@ class FluviusEnergySensor(CoordinatorEntity[FluviusEnergyDataUpdateCoordinator],
         description: FluviusEnergySensorEntityDescription,
         coordinator: FluviusEnergyDataUpdateCoordinator,
         entry_id: str,
-        ean: str,
+        meter_id: str,
         meter_serial: str,
     ) -> None:
         super().__init__(coordinator)
@@ -330,7 +329,7 @@ class FluviusEnergySensor(CoordinatorEntity[FluviusEnergyDataUpdateCoordinator],
         self._attr_unique_id = f"{entry_id}_{description.key}"
         self._attr_has_entity_name = True
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, ean)},
+            identifiers={(DOMAIN, meter_id)},
             manufacturer="Fluvius",
             model=meter_serial,
             name=f"Fluvius meter {meter_serial}",
@@ -381,7 +380,7 @@ class FluviusPeakPowerSensor(CoordinatorEntity[FluviusEnergyDataUpdateCoordinato
         description: SensorEntityDescription,
         coordinator: FluviusEnergyDataUpdateCoordinator,
         entry_id: str,
-        ean: str,
+        meter_id: str,
         meter_serial: str,
     ) -> None:
         super().__init__(coordinator)
@@ -389,7 +388,7 @@ class FluviusPeakPowerSensor(CoordinatorEntity[FluviusEnergyDataUpdateCoordinato
         self._attr_unique_id = f"{entry_id}_{description.key}"
         self._attr_has_entity_name = True
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, ean)},
+            identifiers={(DOMAIN, meter_id)},
             manufacturer="Fluvius",
             model=meter_serial,
             name=f"Fluvius meter {meter_serial}",
@@ -439,7 +438,7 @@ class FluviusQuarterHourlyConsumptionSensor(
         description: SensorEntityDescription,
         coordinator: FluviusEnergyDataUpdateCoordinator,
         entry_id: str,
-        ean: str,
+        meter_id: str,
         meter_serial: str,
     ) -> None:
         super().__init__(coordinator)
@@ -447,7 +446,7 @@ class FluviusQuarterHourlyConsumptionSensor(
         self._attr_unique_id = f"{entry_id}_{description.key}"
         self._attr_has_entity_name = True
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, ean)},
+            identifiers={(DOMAIN, meter_id)},
             manufacturer="Fluvius",
             model=meter_serial,
             name=f"Fluvius meter {meter_serial}",
@@ -520,7 +519,7 @@ class FluviusQuarterHourlyInjectionSensor(
         description: SensorEntityDescription,
         coordinator: FluviusEnergyDataUpdateCoordinator,
         entry_id: str,
-        ean: str,
+        meter_id: str,
         meter_serial: str,
     ) -> None:
         super().__init__(coordinator)
@@ -528,7 +527,7 @@ class FluviusQuarterHourlyInjectionSensor(
         self._attr_unique_id = f"{entry_id}_{description.key}"
         self._attr_has_entity_name = True
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, ean)},
+            identifiers={(DOMAIN, meter_id)},
             manufacturer="Fluvius",
             model=meter_serial,
             name=f"Fluvius meter {meter_serial}",
@@ -601,7 +600,7 @@ class FluviusEnergySharingSensor(
         description: SensorEntityDescription,
         coordinator: FluviusEnergyDataUpdateCoordinator,
         entry_id: str,
-        ean: str,
+        meter_id: str,
         meter_serial: str,
         exchange_id: int,
         metric: str,
@@ -613,7 +612,7 @@ class FluviusEnergySharingSensor(
         self._attr_unique_id = f"{entry_id}_energy_sharing_{exchange_id}_{metric}"
         self._attr_has_entity_name = True
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, ean)},
+            identifiers={(DOMAIN, meter_id)},
             manufacturer="Fluvius",
             model=meter_serial,
             name=f"Fluvius meter {meter_serial}",
